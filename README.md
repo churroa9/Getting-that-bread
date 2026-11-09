@@ -7,6 +7,7 @@ Small, dependency-free Python tools (stdlib only, Python 3.10+) for making and k
 | `rate` | Works backwards from your target income to the hourly, daily or project rate you need to charge | Stops you undercharging for freelance work |
 | `flip` | Profit calculator for reselling on eBay, Etsy, Mercari, Poshmark, Depop or Facebook | Tells you the most to pay and the least to list at |
 | `invoice` | Makes printable HTML invoices and keeps a ledger of what's paid, open or overdue | Helps you actually collect what you're owed |
+| `web/paper-trader.html` | Practice trading account with $100k of pretend money: stocks, options chains, market and limit orders | Lets you practise day trading before risking real money |
 | `printables` | Generates print-ready planners, habit trackers, budget sheets and calendars in 5 colour themes | Digital products to sell on Etsy, Gumroad or Payhip |
 
 ## Quick start
@@ -35,6 +36,10 @@ Run `python -m bread <command> --help` to see every option.
 2. Open each SVG in a browser and print to PDF. Zip each theme's pages into its own folder.
 3. List each theme as its own product, such as "Sage 2027 Planner Bundle". Mockup photos sell better than flat scans.
 4. To make more designs, add new `Theme` entries in `bread/printables.py` or change `title=` to target a niche, such as "Workout Tracker" or "Reading Log".
+
+## Paper trader
+
+`web/paper-trader.html` is a practice trading account with $100,000 of pretend money. When the Robinhood connector is available it uses live quotes from it, through read-only tools only. Otherwise it runs a built-in simulated market. Orders are never sent to a broker. Open the file in a browser to run it in simulated mode.
 
 ## Notes
 

@@ -1,0 +1,780 @@
+<title>Bread Paper Trader</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: a trading desk. Account strip on top, ticket on the left, book (positions/orders/history) on the right; stacks on phones. */
+:root{
+  --bg:#f3f4f7; --panel:#ffffff; --sunk:#eceef3; --line:#d9dce5; --fg:#151a26; --muted:#5d6475;
+  --accent:#2f4fd1; --accent-ink:#ffffff; --up:#0f8a4a; --down:#c8323a; --warn:#a86a00;
+  --up-soft:#e2f4ea; --down-soft:#fbe6e7; --warn-soft:#fbf0d9;
+  --ui:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --num:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0d111a; --panel:#151b28; --sunk:#1b2232; --line:#2a3246; --fg:#e7eaf2; --muted:#959db0;
+  --accent:#7d95ff; --accent-ink:#0d111a; --up:#3fcf83; --down:#ff6b72; --warn:#e6b04a;
+  --up-soft:#173527; --down-soft:#3b1d21; --warn-soft:#3a2f17; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0d111a; --panel:#151b28; --sunk:#1b2232; --line:#2a3246; --fg:#e7eaf2; --muted:#959db0;
+  --accent:#7d95ff; --accent-ink:#0d111a; --up:#3fcf83; --down:#ff6b72; --warn:#e6b04a;
+  --up-soft:#173527; --down-soft:#3b1d21; --warn-soft:#3a2f17; color-scheme:dark}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font-family:var(--ui);font-size:14px;line-height:1.45}
+.wrap{max-width:1240px;margin:0 auto;padding-block:20px 40px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:grid;gap:16px}
+.num{font-family:var(--num);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.up{color:var(--up)} .down{color:var(--down)}
+h1{font-size:18px;margin:0;letter-spacing:.01em;font-weight:700}
+h2{font-size:12px;margin:0;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+
+/* top bar */
+.bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px}
+.brand{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.paper{font:600 11px/1 var(--num);letter-spacing:.08em;padding:5px 8px;border:1.5px dashed var(--warn);color:var(--warn);border-radius:4px}
+.feed{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.seg{display:inline-flex;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:3px;gap:2px}
+.seg button{border:0;background:transparent;color:var(--muted);font:600 12px var(--ui);padding:6px 10px;border-radius:6px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--panel);color:var(--fg);box-shadow:0 1px 2px rgb(0 0 0 / .12)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
+.dot.live{background:var(--up);box-shadow:0 0 0 3px var(--up-soft)}
+.dot.sim{background:var(--warn);box-shadow:0 0 0 3px var(--warn-soft)}
+.dot.err{background:var(--down);box-shadow:0 0 0 3px var(--down-soft)}
+
+/* account strip */
+.strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.stat{padding:14px 16px;border-right:1px solid var(--line);min-width:0}
+.stat:last-child{border-right:0}
+.stat .v{font:600 22px/1.2 var(--num);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat .s{font:500 12px var(--num);margin-top:2px}
+@media (max-width:720px){.strip{grid-template-columns:repeat(2,minmax(0,1fr))}.stat:nth-child(2){border-right:0}.stat:nth-child(-n+2){border-bottom:1px solid var(--line)}.stat .v{font-size:18px}}
+
+.notice{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:var(--panel)}
+.notice.warn{background:var(--warn-soft);border-color:transparent}
+.notice.err{background:var(--down-soft);border-color:transparent}
+
+/* main grid */
+.main{display:grid;grid-template-columns:minmax(0,400px) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:900px){.main{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;min-width:0}
+.card>header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.body{padding:14px;display:grid;gap:12px}
+
+.tabs{display:flex;border-bottom:1px solid var(--line)}
+.tabs button{flex:1;border:0;background:none;color:var(--muted);font:600 13px var(--ui);padding:12px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
+
+label.f{display:grid;gap:4px;font-size:12px;color:var(--muted);font-weight:500;min-width:0}
+input,select{font:500 15px var(--num);color:var(--fg);background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:9px 10px;width:100%;min-width:0}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.sym{display:flex;gap:8px}
+.sym input{text-transform:uppercase;font-weight:600}
+.btn{border:1px solid var(--line);background:var(--sunk);color:var(--fg);font:600 13px var(--ui);padding:9px 12px;border-radius:8px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.btn.buy{background:var(--up);color:#fff;border-color:transparent}
+.btn.sell{background:var(--down);color:#fff;border-color:transparent}
+.btn.ghost{background:transparent}
+.btn.small{padding:5px 9px;font-size:12px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.side{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.side button{border:1px solid var(--line);background:var(--sunk);color:var(--muted);font:700 13px var(--ui);padding:9px;border-radius:8px;cursor:pointer}
+.side button.on.b{background:var(--up-soft);color:var(--up);border-color:var(--up)}
+.side button.on.s{background:var(--down-soft);color:var(--down);border-color:var(--down)}
+
+.quote{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;align-items:baseline;padding:12px;background:var(--sunk);border-radius:10px}
+.quote .px{font:600 28px/1.1 var(--num)}
+.quote .chg{font:500 13px var(--num);text-align:right}
+.quote .ba{grid-column:1/-1;display:flex;gap:16px;font:500 12px var(--num);color:var(--muted);flex-wrap:wrap}
+.est{display:flex;justify-content:space-between;font-size:13px;padding:2px 2px}
+.msg{font-size:13px;padding:8px 10px;border-radius:8px}
+.msg.ok{background:var(--up-soft);color:var(--up)} .msg.bad{background:var(--down-soft);color:var(--down)}
+
+/* tables */
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font:600 11px var(--ui);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:right;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:right;font-family:var(--num);font-variant-numeric:tabular-nums;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+tr:last-child td{border-bottom:0}
+td .tag{font:600 10px var(--ui);letter-spacing:.06em;padding:2px 6px;border-radius:4px;background:var(--sunk);color:var(--muted);margin-left:6px;text-transform:uppercase}
+.empty{padding:22px 14px;color:var(--muted);text-align:center;font-size:13px}
+
+.chain tr.pick{cursor:pointer}
+.chain tr.pick:hover td{background:var(--sunk)}
+.chain tr.sel td{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.chain tr.itm td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+.atm td{border-bottom:2px solid var(--accent)}
+.foot{font-size:12px;color:var(--muted);text-align:center;padding-top:4px}
+@media (prefers-reduced-motion:no-preference){.flash{animation:fl .6s ease}@keyframes fl{from{background:color-mix(in srgb,var(--accent) 22%,transparent)}to{background:transparent}}}
+</style>
+
+<div class="wrap">
+  <div class="bar">
+    <div class="brand"><h1>Bread Paper Trader</h1><span class="paper">PAPER · NO REAL ORDERS</span></div>
+    <div class="feed">
+      <span id="feedDot" class="dot"></span><span id="feedTxt" class="muted" style="font-size:12px">Connecting…</span>
+      <div class="seg" role="group" aria-label="Market data">
+        <button id="mLive" aria-pressed="false">Live prices</button>
+        <button id="mSim" aria-pressed="false">Simulated</button>
+      </div>
+      <button class="btn small ghost" id="refresh" title="Get fresh quotes">Refresh</button>
+    </div>
+  </div>
+
+  <div class="strip">
+    <div class="stat"><h2>Account value</h2><div class="v num" id="sVal">$100,000.00</div><div class="s" id="sPnl">+$0.00 (0.00%) all time</div></div>
+    <div class="stat"><h2>Buying power</h2><div class="v num" id="sCash">$100,000.00</div><div class="s muted">Cash, no margin</div></div>
+    <div class="stat"><h2>Stocks</h2><div class="v num" id="sStk">$0.00</div><div class="s" id="sStkP">—</div></div>
+    <div class="stat"><h2>Options</h2><div class="v num" id="sOpt">$0.00</div><div class="s" id="sOptP">—</div></div>
+  </div>
+
+  <div id="notice" hidden></div>
+
+  <div class="main">
+    <section class="card" aria-label="Order ticket">
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tStock" aria-selected="true">Stocks</button>
+        <button role="tab" id="tOpt" aria-selected="false">Options</button>
+      </div>
+
+      <div class="body">
+        <form class="sym" id="symForm" autocomplete="off">
+          <input id="sym" value="AAPL" maxlength="8" aria-label="Symbol" spellcheck="false">
+          <button class="btn primary" type="submit">Load</button>
+        </form>
+        <div class="quote" id="quoteBox">
+          <div class="px num" id="qPx">—</div><div class="chg" id="qChg"></div>
+          <div class="ba" id="qBa"><span>Loading quote…</span></div>
+        </div>
+
+        <!-- stock ticket -->
+        <div id="stockTicket" style="display:grid;gap:12px">
+          <div class="side" id="sSide"><button type="button" class="on b" data-v="buy">Buy</button><button type="button" class="s" data-v="sell">Sell</button></div>
+          <div class="row">
+            <label class="f">Shares<input id="sQty" type="number" min="1" step="1" value="10" inputmode="numeric"></label>
+            <label class="f">Order type<select id="sType"><option value="market">Market</option><option value="limit">Limit</option></select></label>
+          </div>
+          <label class="f" id="sLimWrap" hidden>Limit price<input id="sLim" type="number" min="0.01" step="0.01" inputmode="decimal"></label>
+          <div class="est"><span class="muted" id="sEstL">Estimated cost</span><span class="num" id="sEst">—</span></div>
+          <button class="btn buy" id="sGo">Buy AAPL</button>
+          <div id="sMsg" hidden></div>
+        </div>
+
+        <!-- options ticket -->
+        <div id="optTicket" hidden style="display:grid;gap:12px">
+          <div class="row">
+            <label class="f">Expiration<select id="oExp"></select></label>
+            <div class="f" style="display:grid;gap:4px;font-size:12px;color:var(--muted);font-weight:500">Type
+              <div class="seg" style="width:100%"><button type="button" id="oCall" aria-pressed="true" style="flex:1">Calls</button><button type="button" id="oPut" aria-pressed="false" style="flex:1">Puts</button></div>
+            </div>
+          </div>
+          <div class="tw" style="max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:10px">
+            <table class="chain"><thead><tr><th>Strike</th><th>Bid</th><th>Ask</th><th>Δ</th><th>IV</th></tr></thead><tbody id="chainBody"><tr><td colspan="5" class="empty">Pick an expiration to see contracts.</td></tr></tbody></table>
+          </div>
+          <div id="oPicked" class="muted" style="font-size:13px">Tap a strike to trade it.</div>
+          <div class="side" id="oSide"><button type="button" class="on b" data-v="buy">Buy to open</button><button type="button" class="s" data-v="sell">Sell to close</button></div>
+          <div class="row">
+            <label class="f">Contracts<input id="oQty" type="number" min="1" step="1" value="1" inputmode="numeric"></label>
+            <label class="f">Order type<select id="oType"><option value="market">Market</option><option value="limit">Limit</option></select></label>
+          </div>
+          <label class="f" id="oLimWrap" hidden>Limit price (per share)<input id="oLim" type="number" min="0.01" step="0.01" inputmode="decimal"></label>
+          <div class="est"><span class="muted" id="oEstL">Estimated cost</span><span class="num" id="oEst">—</span></div>
+          <div class="est"><span class="muted">Breakeven at expiration</span><span class="num" id="oBe">—</span></div>
+          <button class="btn buy" id="oGo" disabled>Pick a contract</button>
+          <div id="oMsg" hidden></div>
+        </div>
+      </div>
+    </section>
+
+    <div style="display:grid;gap:16px;min-width:0">
+      <section class="card">
+        <header><h2>Positions</h2><span class="muted" id="asOf" style="font-size:12px"></span></header>
+        <div class="tw"><table><thead><tr><th>Symbol</th><th>Qty</th><th>Avg cost</th><th>Price</th><th>Value</th><th>P&amp;L</th><th></th></tr></thead><tbody id="posBody"></tbody></table></div>
+      </section>
+      <section class="card">
+        <header><h2>Open orders</h2></header>
+        <div class="tw"><table><thead><tr><th>Order</th><th>Qty</th><th>Limit</th><th>Placed</th><th></th></tr></thead><tbody id="ordBody"></tbody></table></div>
+      </section>
+      <section class="card">
+        <header><h2>History</h2><span style="display:flex;gap:8px"><button class="btn small ghost" id="reset">Reset account</button></span></header>
+        <div class="tw" style="max-height:340px;overflow-y:auto"><table><thead><tr><th>Time</th><th style="text-align:left">Action</th><th>Qty</th><th>Price</th><th>Amount</th></tr></thead><tbody id="histBody"></tbody></table></div>
+      </section>
+    </div>
+  </div>
+  <p class="foot">Practice account with $100,000 of pretend money. Orders fill against the quote's bid and ask and are never sent to a broker. Live prices come from your Robinhood connector, read-only.</p>
+</div>
+
+<script>
+(() => {
+"use strict";
+const SERVER = "RobinHood";
+const START_CASH = 100000;
+const LS_KEY = "bread-paper-trader-v1";
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money = (v, sign) => (sign && v > 0 ? "+" : v < 0 ? "−" : "") + "$" + Math.abs(v).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const px = v => v == null || !isFinite(v) ? "—" : v.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: v < 1 ? 4 : 2});
+const pct = v => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v * 100).toFixed(2) + "%";
+const cls = v => v > 0.004 ? "up" : v < -0.004 ? "down" : "muted";
+const r2 = v => Math.round(v * 100) / 100;
+const num = v => { const n = parseFloat(v); return isFinite(n) ? n : null; };
+const timeStr = t => new Date(t).toLocaleTimeString([], {hour: "numeric", minute: "2-digit", second: "2-digit"});
+const dayStr = t => new Date(t).toLocaleDateString([], {month: "short", day: "numeric"});
+
+// ---------- account state ----------
+const freshAcct = () => ({cash: START_CASH, stocks: {}, options: {}, orders: [], history: [], simPrices: {}});
+let store = {mode: null, accounts: {live: freshAcct(), sim: freshAcct()}};
+try { const raw = localStorage.getItem(LS_KEY); if (raw) store = Object.assign(store, JSON.parse(raw)); } catch (e) {}
+const acct = () => store.accounts[mode || "sim"];
+
+let docRef = null, saving = false, saveAgain = false;
+async function save() {
+  const json = JSON.stringify(store);
+  try { localStorage.setItem(LS_KEY, json); } catch (e) {}
+  if (!docRef) return;
+  if (saving) { saveAgain = true; return; }
+  saving = true;
+  try { await docRef.set({json, updatedAt: new Date().toISOString()}); }
+  catch (e) { showNotice("warn", "Couldn't save to your claude.ai account just now. Your trades are kept in this browser."); }
+  saving = false;
+  if (saveAgain) { saveAgain = false; save(); }
+}
+
+// ---------- market data: live (Robinhood, read-only) ----------
+let mcp = null;
+let liveStatus = "pending"; // pending | ok | error | none
+const live = {
+  async call(tool, input) {
+    const r = await mcp.callTool(SERVER, tool, input, {cache: false});
+    return r.payload;
+  },
+  async quotes(syms) {
+    const p = await this.call("get_equity_quotes", {symbols: syms});
+    const out = {};
+    for (const r of p?.data?.results || []) {
+      const q = r.quote; if (!q) continue;
+      let last = num(q.last_trade_price), t = q.venue_last_trade_time;
+      const ext = num(q.last_non_reg_trade_price);
+      if (ext && q.venue_last_non_reg_trade_time && (!t || q.venue_last_non_reg_trade_time > t)) { last = ext; t = q.venue_last_non_reg_trade_time; }
+      const bid = num(q.bid_price) || null, ask = num(q.ask_price) || null;
+      out[q.symbol] = {last, bid, ask, prev: num(q.adjusted_previous_close) ?? num(q.previous_close), t: t ? Date.parse(t) : Date.now(), state: q.state};
+    }
+    return out;
+  },
+  async expirations(sym) {
+    const p = await this.call("get_option_chains", {underlying_symbol: sym});
+    const chains = p?.data?.chains || [];
+    const c = chains.find(c => c.symbol === sym) || chains[0];
+    const today = new Date().toISOString().slice(0, 10);
+    return c ? c.expiration_dates.filter(d => d >= today) : [];
+  },
+  async chain(sym, exp, type, spot) {
+    let all = [], cursor;
+    for (let page = 0; page < 6; page++) {
+      const input = {chain_symbol: sym, expiration_dates: exp, type, state: "active"};
+      if (cursor) input.cursor = cursor;
+      const p = await this.call("get_option_instruments", input);
+      all = all.concat(p?.data?.instruments || []);
+      cursor = p?.data?.next || p?.next;
+      if (!cursor) break;
+    }
+    all = all.filter(i => i.tradability !== "untradable" && i.expiration_date === exp)
+      .map(i => ({key: i.id, sym, exp, type, strike: num(i.strike_price), mult: num(i.trade_value_multiplier) || 100}));
+    const near = pickNear(all, spot, 16);
+    const qs = await this.optQuotes(near.map(i => i.key));
+    return near.map(i => Object.assign(i, qs[i.key] || {}));
+  },
+  async optQuotes(ids) {
+    const out = {};
+    for (let i = 0; i < ids.length; i += 20) {
+      const p = await this.call("get_option_quotes", {instrument_ids: ids.slice(i, i + 20)});
+      for (const r of p?.data?.results || []) {
+        const q = r.quote; if (!q) continue;
+        out[q.instrument_id] = {bid: num(q.bid_price) || null, ask: num(q.ask_price) || null, mark: num(q.mark_price),
+          delta: num(q.delta), iv: num(q.implied_volatility), prev: num(r.close?.price) ?? num(q.previous_close_price), t: Date.parse(q.updated_at) || Date.now()};
+      }
+    }
+    return out;
+  }
+};
+function pickNear(list, spot, n) {
+  list.sort((a, b) => a.strike - b.strike);
+  if (!spot) return list.slice(0, n);
+  let i = list.findIndex(x => x.strike >= spot); if (i < 0) i = list.length;
+  const lo = Math.max(0, Math.min(i - n / 2, list.length - n));
+  return list.slice(lo, lo + n);
+}
+
+// ---------- market data: simulated ----------
+const sim = {
+  seed(sym) { let h = 2166136261; for (const c of sym) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return 20 + (Math.abs(h) % 38000) / 100; },
+  prev: {},
+  price(sym) {
+    const a = store.accounts.sim;
+    if (a.simPrices[sym] == null) a.simPrices[sym] = r2(this.seed(sym));
+    if (this.prev[sym] == null) this.prev[sym] = a.simPrices[sym];
+    return a.simPrices[sym];
+  },
+  tick() {
+    const a = store.accounts.sim;
+    for (const s of Object.keys(a.simPrices)) {
+      const z = Math.sqrt(-2 * Math.log(Math.random() || 1e-9)) * Math.cos(2 * Math.PI * Math.random());
+      a.simPrices[s] = Math.max(0.5, r2(a.simPrices[s] * Math.exp(0.0016 * z)));
+    }
+  },
+  async quotes(syms) {
+    const out = {};
+    for (const s of syms) { const p = this.price(s), sp = Math.max(0.01, r2(p * 0.0002));
+      out[s] = {last: p, bid: r2(p - sp / 2), ask: r2(p + sp / 2), prev: this.prev[s], t: Date.now(), state: "active"}; }
+    return out;
+  },
+  async expirations() {
+    const out = [], d = new Date(); d.setUTCHours(12, 0, 0, 0);
+    while (out.length < 8) { if (d.getUTCDay() === 5) out.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 1); }
+    return out;
+  },
+  strikeStep(p) { return p < 25 ? 0.5 : p < 100 ? 1 : p < 250 ? 2.5 : 5; },
+  async chain(sym, exp, type, spot) {
+    const step = this.strikeStep(spot), base = Math.round(spot / step) * step, list = [];
+    for (let k = -8; k < 8; k++) { const strike = r2(base + k * step); if (strike > 0) list.push({key: `${sym}|${exp}|${type}|${strike}`, sym, exp, type, strike, mult: 100}); }
+    const qs = await this.optQuotes(list.map(i => i.key));
+    return list.map(i => Object.assign(i, qs[i.key]));
+  },
+  async optQuotes(keys) {
+    const out = {};
+    for (const k of keys) {
+      const [sym, exp, type, strike] = k.split("|");
+      const S = this.price(sym), K = +strike, T = Math.max(1e-6, (expiryMs(exp) - Date.now()) / 31557600000);
+      const iv = 0.32 + 0.12 * Math.abs(Math.log(K / S));
+      const g = bs(S, K, T, 0.04, iv, type);
+      const mark = Math.max(0.01, r2(g.price)), sp = Math.max(0.01, r2(mark * 0.03));
+      out[k] = {bid: Math.max(0.01, r2(mark - sp / 2)), ask: r2(mark + sp / 2), mark, delta: g.delta, iv, t: Date.now()};
+    }
+    return out;
+  }
+};
+function ncdf(x) { const t = 1 / (1 + 0.2316419 * Math.abs(x)), d = 0.3989423 * Math.exp(-x * x / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274)))); return x > 0 ? 1 - p : p; }
+function bs(S, K, T, r, v, type) {
+  const d1 = (Math.log(S / K) + (r + v * v / 2) * T) / (v * Math.sqrt(T)), d2 = d1 - v * Math.sqrt(T);
+  return type === "call" ? {price: S * ncdf(d1) - K * Math.exp(-r * T) * ncdf(d2), delta: ncdf(d1)}
+                         : {price: K * Math.exp(-r * T) * ncdf(-d2) - S * ncdf(-d1), delta: ncdf(d1) - 1};
+}
+// US equity options stop trading at 4pm New York time; 21:00 UTC is close enough for a practice account.
+const expiryMs = exp => Date.parse(exp + "T21:00:00Z");
+
+// ---------- app state ----------
+let mode = null;
+const market = () => mode === "live" ? live : sim;
+let quotes = {}, optQ = {};
+let cur = {sym: "AAPL", tab: "stock", sSide: "buy", oSide: "buy", oType: "call", exp: null, chain: [], picked: null};
+let lastUpdate = null;
+
+function setMode(m, persist = true) {
+  if (m === "live" && !mcp) { showNotice("warn", "Live prices need the Robinhood connector, which this view can't reach. Using simulated prices."); m = "sim"; }
+  mode = m; store.mode = m; quotes = {}; optQ = {}; cur.chain = []; cur.picked = null; cur.exp = null;
+  $("mLive").setAttribute("aria-pressed", m === "live"); $("mSim").setAttribute("aria-pressed", m === "sim");
+  if (persist) save();
+  setFeed(m === "sim" ? "sim" : "pending");
+  renderAll(); refresh(true).then(() => cur.tab === "opt" && loadExps());
+}
+function setFeed(state, text) {
+  const dot = $("feedDot"); dot.className = "dot " + (state === "ok" ? "live" : state === "sim" ? "sim" : state === "err" ? "err" : "");
+  $("feedTxt").textContent = text || (state === "sim" ? "Simulated market" : state === "ok" ? "Live · Robinhood" : state === "err" ? "Live prices unavailable" : "Connecting to Robinhood…");
+}
+function showNotice(kind, html, action) {
+  const n = $("notice");
+  if (!kind) { n.hidden = true; return; }
+  n.className = "notice " + kind; n.hidden = false;
+  n.innerHTML = `<span>${html}</span>` + (action ? `<span style="display:flex;gap:8px">${action}</span>` : "");
+}
+function liveError(e) {
+  const code = e?.code || "upstream_error";
+  setFeed("err");
+  const toSim = `<button class="btn small" data-act="sim">Use simulated prices</button>`;
+  const retry = `<button class="btn small" data-act="retry">Try again</button>`;
+  const msgs = {
+    needs_reauth: ["err", "Your Robinhood connection expired. Reconnect it in claude.ai Settings → Connectors.", toSim],
+    server_not_connected: ["warn", "Live prices use the Robinhood connector, which isn't connected for you. Add it in claude.ai Settings → Connectors, or practise with simulated prices.", toSim],
+    selection_required: ["warn", "You have more than one Robinhood connector. Choose one when claude.ai asks, then try again.", retry + toSim],
+    not_in_manifest: ["warn", "Live prices are turned off for this page. Allow Robinhood in this page's permissions to use them.", retry + toSim],
+    approval_required: ["warn", "Live prices need your OK to read quotes from Robinhood.", `<button class="btn small primary" data-act="retry">Allow live prices</button>` + toSim],
+    blocked_by_policy: ["err", "Your organization blocks these Robinhood tools.", toSim],
+    server_unavailable: ["warn", "Robinhood didn't answer. Prices on screen may be out of date.", retry],
+    tool_error: ["warn", "Robinhood couldn't return that data: " + esc(e?.message || "unknown error"), retry],
+  };
+  const [k, m, a] = msgs[code] || ["warn", "Couldn't load live prices right now.", retry + toSim];
+  showNotice(k, m, a);
+}
+$("notice").addEventListener("click", e => {
+  const a = e.target.closest("[data-act]")?.dataset.act;
+  if (a === "sim") { showNotice(null); setMode("sim"); }
+  if (a === "retry") { showNotice(null); refresh(true).then(() => cur.tab === "opt" && !cur.chain.length && loadExps()); }
+});
+
+// ---------- refreshing ----------
+function watchedSyms() {
+  const a = acct(), s = new Set([cur.sym, ...Object.keys(a.stocks)]);
+  for (const o of Object.values(a.options)) s.add(o.sym);
+  for (const o of a.orders) s.add(o.sym);
+  return [...s].filter(Boolean).slice(0, 20);
+}
+let busy = false;
+async function refresh(force) {
+  if (!mode || (busy && !force)) return;
+  busy = true;
+  try {
+    const m = market();
+    Object.assign(quotes, await m.quotes(watchedSyms()));
+    const a = acct();
+    const keys = new Set([...Object.keys(a.options), ...a.orders.filter(o => o.kind === "opt").map(o => o.key), ...(cur.picked ? [cur.picked.key] : [])]);
+    if (keys.size) Object.assign(optQ, await m.optQuotes([...keys]));
+    if (cur.chain.length) { const q = await m.optQuotes(cur.chain.map(c => c.key)); cur.chain.forEach(c => Object.assign(c, q[c.key] || {})); }
+    lastUpdate = Date.now();
+    if (mode === "live") { setFeed("ok"); showNotice(null); }
+    settleExpired(); checkLimits();
+  } catch (e) { if (mode === "live") liveError(e); else console.error(e); }
+  busy = false;
+  renderAll();
+}
+$("refresh").onclick = () => refresh(true);
+// Live quotes refresh every 15 s while the page is visible; simulated prices tick every 2 s.
+setInterval(() => { if (mode === "live" && document.visibilityState === "visible") refresh(); }, 15000);
+setInterval(() => { if (mode === "sim" && document.visibilityState === "visible") { sim.tick(); refresh(); } }, 2000);
+
+// ---------- trading ----------
+function record(a, h) { a.history.unshift(Object.assign({t: Date.now()}, h)); if (a.history.length > 300) a.history.length = 300; }
+const optLabel = o => `${o.sym} ${px(o.strike)} ${o.type === "call" ? "Call" : "Put"} ${dayStr(Date.parse(o.exp + "T12:00:00Z"))}`;
+
+function fillStock(a, side, sym, qty, price) {
+  const cost = r2(qty * price);
+  if (side === "buy") {
+    if (cost > a.cash + 1e-9) return `Not enough buying power. You need ${money(cost)} and have ${money(a.cash)}.`;
+    const p = a.stocks[sym] || {qty: 0, avg: 0};
+    p.avg = (p.avg * p.qty + cost) / (p.qty + qty); p.qty += qty; a.stocks[sym] = p; a.cash = r2(a.cash - cost);
+  } else {
+    const p = a.stocks[sym];
+    if (!p || p.qty < qty) return `You can only sell shares you own. You have ${p ? p.qty : 0} ${sym}.`;
+    p.qty -= qty; a.cash = r2(a.cash + cost); if (p.qty === 0) delete a.stocks[sym];
+  }
+  record(a, {kind: "stock", side, label: `${side === "buy" ? "Bought" : "Sold"} ${sym}`, qty, price, amount: side === "buy" ? -cost : cost});
+  return null;
+}
+function fillOpt(a, side, c, qty, price) {
+  const mult = c.mult || 100, cost = r2(qty * price * mult);
+  if (side === "buy") {
+    if (cost > a.cash + 1e-9) return `Not enough buying power. You need ${money(cost)} and have ${money(a.cash)}.`;
+    const p = a.options[c.key] || {key: c.key, sym: c.sym, exp: c.exp, type: c.type, strike: c.strike, mult, qty: 0, avg: 0};
+    p.avg = (p.avg * p.qty + price * qty) / (p.qty + qty); p.qty += qty; a.options[c.key] = p; a.cash = r2(a.cash - cost);
+  } else {
+    const p = a.options[c.key];
+    if (!p || p.qty < qty) return `You can only sell contracts you own. This account has ${p ? p.qty : 0} of this contract. Selling to open isn't supported.`;
+    p.qty -= qty; a.cash = r2(a.cash + cost); if (p.qty === 0) delete a.options[c.key];
+  }
+  record(a, {kind: "opt", side, label: `${side === "buy" ? "Bought" : "Sold"} ${optLabel(c)}`, qty, price, amount: side === "buy" ? -cost : cost});
+  return null;
+}
+function settleExpired() {
+  const a = acct(); let changed = false;
+  for (const [k, o] of Object.entries(a.options)) {
+    if (Date.now() < expiryMs(o.exp)) continue;
+    const S = quotes[o.sym]?.last; if (S == null) continue;
+    const intrinsic = Math.max(0, o.type === "call" ? S - o.strike : o.strike - S);
+    const amt = r2(intrinsic * o.mult * o.qty);
+    a.cash = r2(a.cash + amt); delete a.options[k]; changed = true;
+    record(a, {kind: "opt", side: "exp", label: `${intrinsic > 0 ? "Exercised" : "Expired worthless"}: ${optLabel(o)}`, qty: o.qty, price: r2(intrinsic), amount: amt});
+  }
+  const before = a.orders.length;
+  a.orders = a.orders.filter(o => o.kind !== "opt" || Date.now() < expiryMs(o.c.exp));
+  if (a.orders.length !== before) changed = true;
+  if (changed) save();
+}
+function checkLimits() {
+  const a = acct(); if (!a.orders.length) return;
+  let changed = false;
+  a.orders = a.orders.filter(o => {
+    const q = o.kind === "stock" ? quotes[o.sym] : optQ[o.key]; if (!q) return true;
+    const ask = q.ask ?? q.last ?? q.mark, bid = q.bid ?? q.last ?? q.mark;
+    const hit = o.side === "buy" ? ask != null && ask <= o.limit : bid != null && bid >= o.limit;
+    if (!hit) return true;
+    const price = o.side === "buy" ? ask : bid;
+    const err = o.kind === "stock" ? fillStock(a, o.side, o.sym, o.qty, price) : fillOpt(a, o.side, o.c, o.qty, price);
+    if (err) record(a, {kind: o.kind, side: "cxl", label: `Cancelled limit ${o.side}: ${err}`, qty: o.qty, price: o.limit, amount: 0});
+    changed = true; return false;
+  });
+  if (changed) save();
+}
+
+async function submitStock() {
+  const sym = cur.sym, side = cur.sSide, qty = Math.floor(num($("sQty").value) || 0), type = $("sType").value, lim = num($("sLim").value);
+  if (qty < 1) return msg("s", "bad", "Enter at least 1 share.");
+  if (type === "limit" && !(lim > 0)) return msg("s", "bad", "Enter a limit price.");
+  $("sGo").disabled = true;
+  try {
+    const q = (await market().quotes([sym]))[sym]; if (!q || q.last == null) throw {code: "noquote"};
+    quotes[sym] = q;
+    const a = acct(), fillPx = side === "buy" ? (q.ask ?? q.last) : (q.bid ?? q.last);
+    if (type === "market" || (side === "buy" ? fillPx <= lim : fillPx >= lim)) {
+      const err = fillStock(a, side, sym, qty, fillPx);
+      err ? msg("s", "bad", err) : msg("s", "ok", `Filled: ${side === "buy" ? "bought" : "sold"} ${qty} ${sym} at $${px(fillPx)}.`);
+    } else {
+      if (side === "sell" && (a.stocks[sym]?.qty || 0) < qty) return msg("s", "bad", `You only have ${a.stocks[sym]?.qty || 0} ${sym} to sell.`);
+      a.orders.push({id: Math.random().toString(36).slice(2), kind: "stock", side, sym, qty, limit: lim, t: Date.now()});
+      msg("s", "ok", `Limit order placed: ${side} ${qty} ${sym} at $${px(lim)}. It fills when the price gets there.`);
+    }
+    save();
+  } catch (e) { e?.code === "noquote" ? msg("s", "bad", `No quote for ${sym}. Check the symbol.`) : mode === "live" ? liveError(e) : msg("s", "bad", "Order failed."); }
+  finally { $("sGo").disabled = false; renderAll(); }
+}
+async function submitOpt() {
+  const c = cur.picked; if (!c) return;
+  const side = cur.oSide, qty = Math.floor(num($("oQty").value) || 0), type = $("oType").value, lim = num($("oLim").value);
+  if (qty < 1) return msg("o", "bad", "Enter at least 1 contract.");
+  if (type === "limit" && !(lim > 0)) return msg("o", "bad", "Enter a limit price.");
+  if (Date.now() >= expiryMs(c.exp)) return msg("o", "bad", "This contract has stopped trading.");
+  $("oGo").disabled = true;
+  try {
+    const q = (await market().optQuotes([c.key]))[c.key]; if (!q) throw {code: "noquote"};
+    optQ[c.key] = q; Object.assign(c, q);
+    const a = acct(), fillPx = side === "buy" ? (q.ask ?? q.mark) : (q.bid ?? q.mark);
+    if (fillPx == null) throw {code: "noquote"};
+    if (type === "market" || (side === "buy" ? fillPx <= lim : fillPx >= lim)) {
+      const err = fillOpt(a, side, c, qty, fillPx);
+      err ? msg("o", "bad", err) : msg("o", "ok", `Filled: ${side === "buy" ? "bought" : "sold"} ${qty} × ${optLabel(c)} at $${px(fillPx)} ($${px(fillPx * (c.mult || 100))} per contract).`);
+    } else {
+      if (side === "sell" && (a.options[c.key]?.qty || 0) < qty) return msg("o", "bad", "You can only sell contracts you own.");
+      const cc = {key: c.key, sym: c.sym, exp: c.exp, type: c.type, strike: c.strike, mult: c.mult || 100};
+      a.orders.push({id: Math.random().toString(36).slice(2), kind: "opt", side, key: c.key, c: cc, sym: c.sym, qty, limit: lim, t: Date.now()});
+      msg("o", "ok", `Limit order placed at $${px(lim)}. It fills when the price gets there.`);
+    }
+    save();
+  } catch (e) { e?.code === "noquote" ? msg("o", "bad", "No quote for this contract right now.") : mode === "live" ? liveError(e) : msg("o", "bad", "Order failed."); }
+  finally { renderAll(); }
+}
+function msg(p, kind, text) { const el = $(p + "Msg"); el.hidden = false; el.className = "msg " + kind; el.textContent = text; }
+
+// ---------- options chain ----------
+async function loadExps() {
+  const sel = $("oExp"); sel.innerHTML = `<option>Loading…</option>`;
+  try {
+    const exps = await market().expirations(cur.sym);
+    if (!exps.length) { sel.innerHTML = `<option>No options</option>`; $("chainBody").innerHTML = `<tr><td colspan="5" class="empty">${esc(cur.sym)} has no listed options.</td></tr>`; return; }
+    sel.innerHTML = exps.slice(0, 30).map(d => `<option value="${d}">${new Date(d + "T12:00:00Z").toLocaleDateString([], {month: "short", day: "numeric", year: "numeric"})} · ${Math.max(0, Math.round((expiryMs(d) - Date.now()) / 864e5))}d</option>`).join("");
+    cur.exp = exps.find(d => (expiryMs(d) - Date.now()) / 864e5 >= 5) || exps[0];
+    sel.value = cur.exp; loadChain();
+  } catch (e) { sel.innerHTML = `<option>Unavailable</option>`; mode === "live" && liveError(e); }
+}
+async function loadChain() {
+  $("chainBody").innerHTML = `<tr><td colspan="5" class="empty">Loading contracts…</td></tr>`;
+  try {
+    let spot = quotes[cur.sym]?.last;
+    if (spot == null) { Object.assign(quotes, await market().quotes([cur.sym])); spot = quotes[cur.sym]?.last; }
+    cur.chain = await market().chain(cur.sym, cur.exp, cur.oType, spot);
+    renderChain(true);
+  } catch (e) { $("chainBody").innerHTML = `<tr><td colspan="5" class="empty">Couldn't load contracts.</td></tr>`; mode === "live" && liveError(e); }
+}
+$("oExp").onchange = e => { cur.exp = e.target.value; cur.picked = null; loadChain(); renderOptTicket(); };
+$("oCall").onclick = () => { cur.oType = "call"; cur.picked = null; $("oCall").setAttribute("aria-pressed", true); $("oPut").setAttribute("aria-pressed", false); loadChain(); renderOptTicket(); };
+$("oPut").onclick = () => { cur.oType = "put"; cur.picked = null; $("oPut").setAttribute("aria-pressed", true); $("oCall").setAttribute("aria-pressed", false); loadChain(); renderOptTicket(); };
+$("chainBody").onclick = e => {
+  const tr = e.target.closest("tr[data-k]"); if (!tr) return;
+  cur.picked = cur.chain.find(c => c.key === tr.dataset.k) || null;
+  if (cur.picked && $("oType").value === "limit") $("oLim").value = (cur.oSide === "buy" ? cur.picked.ask : cur.picked.bid) ?? "";
+  $("oMsg").hidden = true; renderChain(); renderOptTicket();
+};
+
+// ---------- rendering ----------
+function stockPx(s) { return quotes[s]?.last; }
+function optMark(k, o) { const q = optQ[k]; return q?.mark ?? (q?.bid != null && q?.ask != null ? (q.bid + q.ask) / 2 : null); }
+function renderAll() { renderStrip(); renderQuote(); renderStockTicket(); renderOptTicket(); renderPositions(); renderOrders(); renderHistory(); }
+
+function renderStrip() {
+  const a = acct(); if (!a) return;
+  let stk = 0, stkCost = 0, opt = 0, optCost = 0;
+  for (const [s, p] of Object.entries(a.stocks)) { const v = stockPx(s) ?? p.avg; stk += v * p.qty; stkCost += p.avg * p.qty; }
+  for (const [k, o] of Object.entries(a.options)) { const m = optMark(k, o) ?? o.avg; opt += m * o.qty * o.mult; optCost += o.avg * o.qty * o.mult; }
+  const val = a.cash + stk + opt, pnl = val - START_CASH;
+  $("sVal").textContent = money(val); $("sCash").textContent = money(a.cash);
+  $("sPnl").className = "s " + cls(pnl); $("sPnl").textContent = `${money(pnl, true)} (${pct(pnl / START_CASH)}) all time`;
+  $("sStk").textContent = money(stk); $("sOpt").textContent = money(opt);
+  const sp = stk - stkCost, op = opt - optCost;
+  $("sStkP").className = "s " + (stkCost ? cls(sp) : "muted"); $("sStkP").textContent = stkCost ? `${money(sp, true)} open P&L` : "No shares held";
+  $("sOptP").className = "s " + (optCost ? cls(op) : "muted"); $("sOptP").textContent = optCost ? `${money(op, true)} open P&L` : "No contracts held";
+  $("asOf").textContent = lastUpdate ? `Updated ${timeStr(lastUpdate)}` : "";
+}
+function renderQuote() {
+  const q = quotes[cur.sym];
+  if (!q) { $("qPx").textContent = "—"; $("qChg").textContent = ""; $("qBa").innerHTML = `<span>${mode ? "Loading " + esc(cur.sym) + "…" : "Choose a market data source above."}</span>`; return; }
+  $("qPx").textContent = "$" + px(q.last);
+  const ch = q.prev ? q.last - q.prev : 0;
+  $("qChg").className = "chg " + cls(ch); $("qChg").textContent = q.prev ? `${money(ch, true)} (${pct(ch / q.prev)}) today` : "";
+  const age = Date.now() - q.t, stale = mode === "live" && age > 15 * 60e3;
+  $("qBa").innerHTML = `<span>${esc(cur.sym)}</span><span>Bid ${q.bid ? px(q.bid) : "—"}</span><span>Ask ${q.ask ? px(q.ask) : "—"}</span><span>${stale ? "Last trade " + new Date(q.t).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"}) + " (market may be closed)" : "as of " + timeStr(q.t)}</span>`;
+}
+function renderStockTicket() {
+  const q = quotes[cur.sym], qty = Math.floor(num($("sQty").value) || 0), lim = num($("sLim").value), type = $("sType").value;
+  $("sLimWrap").hidden = type !== "limit";
+  const p = type === "limit" && lim ? lim : q ? (cur.sSide === "buy" ? q.ask ?? q.last : q.bid ?? q.last) : null;
+  $("sEstL").textContent = cur.sSide === "buy" ? "Estimated cost" : "Estimated credit";
+  $("sEst").textContent = p && qty ? money(p * qty) : "—";
+  const held = acct()?.stocks[cur.sym]?.qty || 0;
+  $("sGo").className = "btn " + (cur.sSide === "buy" ? "buy" : "sell");
+  $("sGo").textContent = `${type === "limit" ? "Place limit " : ""}${cur.sSide === "buy" ? "Buy" : "Sell"} ${cur.sym}` + (cur.sSide === "sell" ? ` (you own ${held})` : "");
+}
+function renderChain(scroll) {
+  if (!cur.chain.length) return;
+  const spot = quotes[cur.sym]?.last;
+  let atmDone = false;
+  $("chainBody").innerHTML = cur.chain.map((c, i) => {
+    const itm = spot != null && (c.type === "call" ? c.strike < spot : c.strike > spot);
+    const next = cur.chain[i + 1], atm = !atmDone && spot != null && next && c.strike < spot && next.strike >= spot;
+    if (atm) atmDone = true;
+    return `<tr class="pick${itm ? " itm" : ""}${atm ? " atm" : ""}${cur.picked?.key === c.key ? " sel" : ""}" data-k="${esc(c.key)}" tabindex="0">
+      <td>${px(c.strike)}</td><td>${px(c.bid)}</td><td>${px(c.ask)}</td><td>${c.delta != null ? c.delta.toFixed(2) : "—"}</td><td>${c.iv != null ? (c.iv * 100).toFixed(0) + "%" : "—"}</td></tr>`;
+  }).join("");
+  if (scroll) { const r = $("chainBody").querySelector(".atm"); r && r.scrollIntoView({block: "center"}); window.scrollTo(window.scrollX, window.scrollY); }
+}
+function renderOptTicket() {
+  const c = cur.picked, go = $("oGo");
+  $("oLimWrap").hidden = $("oType").value !== "limit";
+  if (!c) { $("oPicked").textContent = "Tap a strike to trade it."; go.disabled = true; go.textContent = "Pick a contract"; go.className = "btn buy"; $("oEst").textContent = "—"; $("oBe").textContent = "—"; return; }
+  const q = optQ[c.key] || c, qty = Math.floor(num($("oQty").value) || 0), lim = num($("oLim").value);
+  const p = $("oType").value === "limit" && lim ? lim : (cur.oSide === "buy" ? q.ask ?? q.mark : q.bid ?? q.mark);
+  const held = acct().options[c.key]?.qty || 0;
+  $("oPicked").innerHTML = `<b style="color:var(--fg)">${esc(optLabel(c))}</b> · bid ${px(q.bid)} / ask ${px(q.ask)}${held ? ` · you own ${held}` : ""}`;
+  $("oEstL").textContent = cur.oSide === "buy" ? "Estimated cost" : "Estimated credit";
+  $("oEst").textContent = p && qty ? money(p * qty * (c.mult || 100)) : "—";
+  const be = p != null ? (c.type === "call" ? c.strike + p : c.strike - p) : null;
+  $("oBe").textContent = be != null ? `${c.sym} ${c.type === "call" ? "above" : "below"} $${px(be)}` : "—";
+  go.disabled = false; go.className = "btn " + (cur.oSide === "buy" ? "buy" : "sell");
+  go.textContent = `${$("oType").value === "limit" ? "Place limit · " : ""}${cur.oSide === "buy" ? "Buy" : "Sell"} ${qty || ""} contract${qty === 1 ? "" : "s"}`;
+}
+function renderPositions() {
+  const a = acct(), rows = [];
+  for (const [s, p] of Object.entries(a.stocks)) {
+    const last = stockPx(s), val = last != null ? last * p.qty : null, pl = val != null ? val - p.avg * p.qty : null;
+    rows.push(`<tr><td><b>${esc(s)}</b></td><td>${p.qty}</td><td>${px(p.avg)}</td><td>${px(last)}</td><td>${val != null ? money(val) : "—"}</td>
+      <td class="${cls(pl ?? 0)}">${pl != null ? `${money(pl, true)}<br><small>${pct(pl / (p.avg * p.qty))}</small>` : "—"}</td>
+      <td><button class="btn small" data-close-s="${esc(s)}">Close</button></td></tr>`);
+  }
+  for (const [k, o] of Object.entries(a.options)) {
+    const m = optMark(k, o), val = m != null ? m * o.qty * o.mult : null, pl = val != null ? val - o.avg * o.qty * o.mult : null;
+    const dte = Math.ceil((expiryMs(o.exp) - Date.now()) / 864e5);
+    rows.push(`<tr><td><b>${esc(o.sym)}</b> ${px(o.strike)}${o.type === "call" ? "C" : "P"}<span class="tag">${dte}d</span></td><td>${o.qty}</td><td>${px(o.avg)}</td><td>${px(m)}</td><td>${val != null ? money(val) : "—"}</td>
+      <td class="${cls(pl ?? 0)}">${pl != null ? `${money(pl, true)}<br><small>${pct(pl / (o.avg * o.qty * o.mult))}</small>` : "—"}</td>
+      <td><button class="btn small" data-close-o="${esc(k)}">Close</button></td></tr>`);
+  }
+  $("posBody").innerHTML = rows.join("") || `<tr><td colspan="7" class="empty">No positions yet. Place a trade from the ticket to start.</td></tr>`;
+}
+function renderOrders() {
+  const a = acct();
+  $("ordBody").innerHTML = a.orders.map(o => `<tr><td>${o.side === "buy" ? "Buy" : "Sell"} ${esc(o.kind === "stock" ? o.sym : optLabel(o.c))}</td><td>${o.qty}</td><td>${px(o.limit)}</td><td>${timeStr(o.t)}</td>
+    <td><button class="btn small ghost" data-cancel="${esc(o.id)}">Cancel</button></td></tr>`).join("")
+    || `<tr><td colspan="5" class="empty">No open limit orders.</td></tr>`;
+}
+function renderHistory() {
+  const a = acct();
+  $("histBody").innerHTML = a.history.map(h => `<tr><td>${dayStr(h.t)} ${timeStr(h.t)}</td><td style="text-align:left;font-family:var(--ui)">${esc(h.label)}</td><td>${h.qty}</td><td>${px(h.price)}</td>
+    <td class="${cls(h.amount)}">${h.amount ? money(h.amount, true) : "—"}</td></tr>`).join("")
+    || `<tr><td colspan="5" class="empty">Your fills, expirations and cancellations will show here.</td></tr>`;
+}
+
+// close / cancel buttons
+document.addEventListener("click", async e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.closeS) {
+    const s = b.dataset.closeS; setSym(s); setTab("stock"); setSide("s", "sell");
+    $("sQty").value = acct().stocks[s]?.qty || 1; $("sType").value = "market"; renderAll();
+    $("sGo").scrollIntoView({block: "center", behavior: "smooth"}); $("sGo").focus({preventScroll: true});
+  }
+  if (b.dataset.closeO) {
+    const o = acct().options[b.dataset.closeO]; if (!o) return;
+    cur.picked = Object.assign({}, o, optQ[o.key] || {}); setTab("opt", true); setSide("o", "sell");
+    $("oQty").value = o.qty; $("oType").value = "market"; renderAll();
+    $("oGo").scrollIntoView({block: "center", behavior: "smooth"}); $("oGo").focus({preventScroll: true});
+  }
+  if (b.dataset.cancel) {
+    const a = acct(), o = a.orders.find(x => x.id === b.dataset.cancel); if (!o) return;
+    a.orders = a.orders.filter(x => x !== o);
+    record(a, {kind: o.kind, side: "cxl", label: `Cancelled limit ${o.side} ${o.kind === "stock" ? o.sym : optLabel(o.c)}`, qty: o.qty, price: o.limit, amount: 0});
+    save(); renderAll();
+  }
+});
+
+// ---------- inputs ----------
+function setSym(s) { cur.sym = s; $("sym").value = s; cur.chain = []; cur.picked = null; }
+$("symForm").onsubmit = e => {
+  e.preventDefault();
+  const s = $("sym").value.trim().toUpperCase();
+  if (!/^[A-Z][A-Z.]{0,7}$/.test(s)) return msg(cur.tab === "stock" ? "s" : "o", "bad", "Enter a ticker symbol like AAPL or SPY.");
+  setSym(s); renderAll(); refresh(true).then(() => cur.tab === "opt" && loadExps());
+};
+function setTab(t, keepPicked) {
+  cur.tab = t;
+  $("tStock").setAttribute("aria-selected", t === "stock"); $("tOpt").setAttribute("aria-selected", t === "opt");
+  $("stockTicket").hidden = t !== "stock"; $("optTicket").hidden = t !== "opt";
+  $("stockTicket").style.display = t === "stock" ? "grid" : "none"; $("optTicket").style.display = t === "opt" ? "grid" : "none";
+  if (t === "opt") {
+    const p = keepPicked ? cur.picked : null;
+    if (p) {
+      if (cur.sym !== p.sym) { cur.sym = p.sym; $("sym").value = p.sym; }
+      cur.oType = p.type; $("oCall").setAttribute("aria-pressed", p.type === "call"); $("oPut").setAttribute("aria-pressed", p.type === "put");
+      market().expirations(p.sym).then(exps => {
+        $("oExp").innerHTML = exps.slice(0, 30).map(d => `<option value="${d}">${d}</option>`).join(""); cur.exp = p.exp; $("oExp").value = p.exp;
+        return loadChain();
+      }).then(() => { cur.picked = cur.chain.find(c => c.key === p.key) || p; renderChain(); renderOptTicket(); }).catch(e => mode === "live" && liveError(e));
+    } else if (!cur.chain.length && mode) loadExps();
+  }
+}
+$("tStock").onclick = () => setTab("stock");
+$("tOpt").onclick = () => setTab("opt");
+function setSide(p, v) {
+  if (p === "s") cur.sSide = v; else cur.oSide = v;
+  for (const b of $(p + "Side").children) b.classList.toggle("on", b.dataset.v === v);
+  $(p + "Msg").hidden = true; renderAll();
+}
+$("sSide").onclick = e => { const v = e.target.closest("button")?.dataset.v; v && setSide("s", v); };
+$("oSide").onclick = e => { const v = e.target.closest("button")?.dataset.v; v && setSide("o", v); };
+for (const id of ["sQty", "sLim", "oQty", "oLim"]) $(id).addEventListener("input", () => { renderStockTicket(); renderOptTicket(); });
+$("sType").onchange = () => { if ($("sType").value === "limit" && !$("sLim").value) { const q = quotes[cur.sym]; $("sLim").value = q ? q.last : ""; } renderStockTicket(); };
+$("oType").onchange = () => { if ($("oType").value === "limit" && cur.picked && !$("oLim").value) $("oLim").value = cur.picked.mark ?? ""; renderOptTicket(); };
+$("sGo").onclick = submitStock;
+$("oGo").onclick = submitOpt;
+$("mLive").onclick = () => mode !== "live" && setMode("live");
+$("mSim").onclick = () => mode !== "sim" && setMode("sim");
+
+let resetArmed = null;
+$("reset").onclick = () => {
+  const b = $("reset");
+  if (!resetArmed) { b.textContent = "Tap again to wipe this account"; b.classList.add("sell"); resetArmed = setTimeout(() => { resetArmed = null; b.textContent = "Reset account"; b.classList.remove("sell"); }, 4000); return; }
+  clearTimeout(resetArmed); resetArmed = null; b.textContent = "Reset account"; b.classList.remove("sell");
+  store.accounts[mode] = freshAcct(); optQ = {}; save(); renderAll(); refresh(true);
+};
+
+// ---------- boot ----------
+renderAll();
+(async () => {
+  const c = window.claude;
+  const [m, db, user] = c?.use ? await Promise.all([c.use("mcp"), c.use("db"), c.use("user")]) : [null, null, null];
+  mcp = m;
+  // Load the account saved to the viewer's private storage, if any.
+  try {
+    const uid = user ? await user.id() : null;
+    if (db && uid) {
+      docRef = db.doc(`data/users/${uid}/account`);
+      const snap = await docRef.get();
+      if (snap.exists && typeof snap.data().json === "string") store = Object.assign(store, JSON.parse(snap.data().json));
+      else if (store.accounts.live.history.length || store.accounts.sim.history.length) save();
+    }
+  } catch (e) { docRef = null; }
+  setMode(store.mode === "sim" || !mcp ? "sim" : "live", false);
+  if (!mcp) showNotice("warn", "This view can't reach your Robinhood connector, so prices are simulated. Open the page on claude.ai with Robinhood connected for live quotes.");
+})();
+})();
+</script>
