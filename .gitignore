@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+invoices.json
+INV-*.html
+printables_out/

@@ -1,0 +1,15 @@
+{
+  "client": "Acme Coffee Co.",
+  "client_details": "123 Main St\nPortland, OR 97201",
+  "from_name": "Your Name Design",
+  "from_details": "you@example.com\n(555) 123-4567",
+  "items": [
+    {"description": "Logo design (3 concepts, 2 revisions)", "quantity": 1, "unit_price": 650},
+    {"description": "Website landing page", "quantity": 12, "unit_price": 85},
+    {"description": "Stock photo license", "quantity": 3, "unit_price": 15}
+  ],
+  "due_days": 14,
+  "tax_rate": 0.0,
+  "payment_instructions": "Pay by bank transfer or at https://example.com/pay\nReference the invoice number with your payment.",
+  "notes": "Thank you for your business! Late payments incur a 1.5% monthly fee."
+}
