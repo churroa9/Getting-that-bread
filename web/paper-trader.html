@@ -111,6 +111,26 @@ td .tag{font:600 10px var(--ui);letter-spacing:.06em;padding:2px 6px;border-radi
 .chain tr.itm td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
 .atm td{border-bottom:2px solid var(--accent)}
 .foot{font-size:12px;color:var(--muted);text-align:center;padding-top:4px}
+
+/* price chart */
+.chead{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;flex-wrap:wrap;padding:14px 14px 4px}
+.chead .t{font:600 13px var(--ui);color:var(--muted)}
+.chead .p{font:600 24px/1.15 var(--num)}
+.chead .c{font:500 12px var(--num)}
+.ranges{display:flex;gap:2px}
+.ranges button{border:0;background:none;color:var(--muted);font:600 12px var(--num);padding:6px 9px;border-radius:6px;cursor:pointer}
+.ranges button[aria-pressed="true"]{background:var(--sunk);color:var(--fg)}
+.cbox{position:relative;height:240px;margin:0 6px 8px;touch-action:pan-y}
+@media (max-width:600px){.cbox{height:190px}}
+.cbox svg{display:block;width:100%;height:100%}
+.cbox .ax{font:500 10.5px var(--num);fill:var(--muted)}
+.cbox .grid{stroke:var(--line);stroke-width:1}
+.cbox .refl{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 4;opacity:.8}
+.cbox .cross{stroke:var(--muted);stroke-width:1}
+.cstate{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:13px;text-align:center;padding:0 20px}
+.tip{position:absolute;top:4px;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:500 12px var(--num);white-space:nowrap;box-shadow:0 4px 14px rgb(0 0 0 / .12);transform:translateX(-50%)}
+.tip b{display:block;font-size:13px;color:var(--fg)}
+@media (prefers-reduced-motion:no-preference){.pulse{animation:pu 1.6s ease-out infinite;transform-box:fill-box;transform-origin:center}@keyframes pu{from{transform:scale(1);opacity:.55}to{transform:scale(3.2);opacity:0}}}
 @media (prefers-reduced-motion:no-preference){.flash{animation:fl .6s ease}@keyframes fl{from{background:color-mix(in srgb,var(--accent) 22%,transparent)}to{background:transparent}}}
 </style>
 
@@ -193,6 +213,15 @@ td .tag{font:600 10px var(--ui);letter-spacing:.06em;padding:2px 6px;border-radi
     </section>
 
     <div style="display:grid;gap:16px;min-width:0">
+      <section class="card" aria-label="Price chart">
+        <div class="chead">
+          <div style="min-width:0"><div class="t" id="cTitle">AAPL</div><div class="p" id="cPx">—</div><div class="c" id="cChg">&nbsp;</div></div>
+          <div class="ranges" role="group" aria-label="Chart range" id="cRanges">
+            <button data-r="1D" aria-pressed="true">1D</button><button data-r="1W" aria-pressed="false">1W</button><button data-r="1M" aria-pressed="false">1M</button><button data-r="3M" aria-pressed="false">3M</button><button data-r="1Y" aria-pressed="false">1Y</button>
+          </div>
+        </div>
+        <div class="cbox" id="cBox"><svg id="cSvg" role="img" aria-label="Price chart"></svg><div class="cstate" id="cState">Loading chart…</div><div class="tip" id="cTip" hidden></div></div>
+      </section>
       <section class="card">
         <header><h2>Positions</h2><span class="muted" id="asOf" style="font-size:12px"></span></header>
         <div class="tw"><table><thead><tr><th>Symbol</th><th>Qty</th><th>Avg cost</th><th>Price</th><th>Value</th><th>P&amp;L</th><th></th></tr></thead><tbody id="posBody"></tbody></table></div>
@@ -314,7 +343,7 @@ function pickNear(list, spot, n) {
 // ---------- market data: simulated ----------
 const sim = {
   seed(sym) { let h = 2166136261; for (const c of sym) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return 20 + (Math.abs(h) % 38000) / 100; },
-  prev: {},
+  prev: {}, ticks: {},
   price(sym) {
     const a = store.accounts.sim;
     if (a.simPrices[sym] == null) a.simPrices[sym] = r2(this.seed(sym));
@@ -326,6 +355,8 @@ const sim = {
     for (const s of Object.keys(a.simPrices)) {
       const z = Math.sqrt(-2 * Math.log(Math.random() || 1e-9)) * Math.cos(2 * Math.PI * Math.random());
       a.simPrices[s] = Math.max(0.5, r2(a.simPrices[s] * Math.exp(0.0016 * z)));
+      const tk = this.ticks[s] || (this.ticks[s] = []);
+      tk.push({t: Date.now(), p: a.simPrices[s]}); if (tk.length > 3000) tk.shift();
     }
   },
   async quotes(syms) {
@@ -437,6 +468,8 @@ async function refresh(force) {
     if (keys.size) Object.assign(optQ, await m.optQuotes([...keys]));
     if (cur.chain.length) { const q = await m.optQuotes(cur.chain.map(c => c.key)); cur.chain.forEach(c => Object.assign(c, q[c.key] || {})); }
     lastUpdate = Date.now();
+    chartTail();
+    if (Date.now() - chart.fetchedAt > 5 * 60e3) loadChart(true);
     if (mode === "live") { setFeed("ok"); showNotice(null); }
     settleExpired(); checkLimits();
   } catch (e) { if (mode === "live") liveError(e); else console.error(e); }
@@ -589,10 +622,179 @@ $("chainBody").onclick = e => {
   $("oMsg").hidden = true; renderChain(); renderOptTicket();
 };
 
+// ---------- price chart ----------
+// One line, colored green or red by whether the price is above or below the reference
+// (previous close for 1D, the first point for longer ranges). The newest point follows live quotes.
+const RANGES = {
+  "1D": {ms: 4 * 864e5, iv: "5minute", step: 5 * 60e3, n: 78, vol: 0.0015},
+  "1W": {ms: 7 * 864e5, iv: "30minute", step: 30 * 60e3, n: 65, vol: 0.004},
+  "1M": {ms: 31 * 864e5, iv: "hour", step: 3600e3, n: 154, vol: 0.006},
+  "3M": {ms: 92 * 864e5, iv: "day", step: 864e5, n: 63, vol: 0.017},
+  "1Y": {ms: 366 * 864e5, iv: "day", step: 864e5, n: 252, vol: 0.017},
+};
+const chart = {range: "1D", k: null, pts: [], ref: null, fetchedAt: 0, err: null, loading: false, hover: null, seq: 0};
+const etDay = t => new Date(t).toLocaleDateString("en-CA", {timeZone: "America/New_York"});
+function chartSubject() {
+  if (cur.tab === "opt" && cur.picked) return {kind: "opt", c: cur.picked, key: "o:" + cur.picked.key, label: optLabel(cur.picked)};
+  return {kind: "stock", sym: cur.sym, key: "s:" + cur.sym, label: cur.sym};
+}
+function barsToPts(p) {
+  const r = (p?.data?.results || [])[0];
+  return (r?.bars || []).filter(b => !b.interpolated).map(b => ({t: Date.parse(b.begins_at), p: num(b.close_price)})).filter(x => x.p != null);
+}
+live.history = async function (subj, range) {
+  const R = RANGES[range], start = new Date(Date.now() - R.ms).toISOString();
+  const p = subj.kind === "stock"
+    ? await this.call("get_equity_historicals", {symbols: [subj.sym], start_time: start, interval: R.iv})
+    : await this.call("get_option_historicals", {instrument_ids: [subj.c.key], start_time: start, interval: R.iv});
+  return barsToPts(p);
+};
+sim.history = async function (subj, range) {
+  const R = RANGES[range], sym = subj.kind === "stock" ? subj.sym : subj.c.sym;
+  this.price(sym);
+  let seed = 0; for (const ch of sym + range) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+  const ticks = this.ticks[sym] || [], anchorT = ticks.length ? ticks[0].t : Date.now();
+  let p = this.prev[sym], pts = [{t: anchorT, p}];
+  for (let i = 1; i < R.n; i++) { const z = Math.sqrt(-2 * Math.log(rnd() || 1e-9)) * Math.cos(2 * Math.PI * rnd()); p = r2(p / Math.exp(R.vol * z)); pts.unshift({t: anchorT - i * R.step, p}); }
+  pts = pts.concat(ticks.filter((x, i) => i % 3 === 0 || i === ticks.length - 1));
+  if (subj.kind === "opt") {
+    const c = subj.c, end = expiryMs(c.exp);
+    pts = pts.map(x => { const T = Math.max(1e-6, (end - x.t) / 31557600000), iv = 0.32 + 0.12 * Math.abs(Math.log(c.strike / x.p));
+      return {t: x.t, p: Math.max(0.01, r2(bs(x.p, c.strike, T, 0.04, iv, c.type).price))}; });
+  }
+  return pts;
+};
+async function loadChart(force) {
+  if (!mode) return;
+  const subj = chartSubject(), k = `${mode}|${subj.key}|${chart.range}`;
+  if (!force && chart.k === k) return;
+  const fresh = chart.k !== k;
+  chart.k = k; chart.loading = true; chart.err = null; chart.hover = null;
+  if (fresh) { chart.pts = []; drawChart(); }
+  const seq = ++chart.seq;
+  try {
+    let pts = await market().history(subj, chart.range);
+    if (seq !== chart.seq) return;
+    if (chart.range === "1D" && pts.length && mode === "live") { const d = etDay(pts[pts.length - 1].t); pts = pts.filter(x => etDay(x.t) === d); }
+    chart.pts = pts; chart.fetchedAt = Date.now();
+  } catch (e) { if (seq !== chart.seq) return; chart.err = e; chart.pts = []; }
+  chart.loading = false;
+  chartTail(); drawChart();
+}
+function chartRef(subj) {
+  if (chart.range === "1D") {
+    const prev = subj.kind === "stock" ? quotes[subj.sym]?.prev : optQ[subj.c.key]?.prev;
+    if (prev) return prev;
+  }
+  return chart.pts[0]?.p ?? null;
+}
+// Fold the latest quote into the end of the line so the chart moves between bar fetches.
+function chartTail() {
+  if (!chart.pts.length || chart.range !== "1D") return;
+  const subj = chartSubject(), q = subj.kind === "stock" ? quotes[subj.sym] : optQ[subj.c.key];
+  const p = subj.kind === "stock" ? q?.last : q?.mark;
+  if (p == null) return;
+  const last = chart.pts[chart.pts.length - 1];
+  if (mode === "sim") { if (last.t < q.t) chart.pts.push({t: q.t, p}); if (chart.pts.length > 1500) chart.pts.shift(); }
+  else if (q.t > last.t && etDay(q.t) === etDay(last.t)) {
+    if (last.live && q.t - chart.pts[chart.pts.length - 2].t < 5 * 60e3) { last.t = q.t; last.p = p; }
+    else chart.pts.push({t: q.t, p, live: true});
+  }
+}
+function syncChart() {
+  const subj = chartSubject();
+  if (mode && chart.k !== `${mode}|${subj.key}|${chart.range}`) loadChart();
+  else drawChart();
+}
+function niceTicks(lo, hi, n) {
+  const raw = (hi - lo) / n, mag = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / mag;
+  const step = (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * mag, out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(6));
+  return out;
+}
+function fmtT(t) {
+  const d = new Date(t);
+  if (chart.range === "1D") return d.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
+  if (chart.range === "1W" || chart.range === "1M") return d.toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
+  return d.toLocaleDateString([], {month: "short", day: "numeric", year: "numeric"});
+}
+function fmtAxis(t) {
+  const d = new Date(t);
+  if (chart.range === "1D") return d.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
+  if (chart.range === "1Y") return d.toLocaleDateString([], {month: "short", year: "2-digit"});
+  return d.toLocaleDateString([], {month: "short", day: "numeric"});
+}
+function drawChart() {
+  const subj = chartSubject(), svg = $("cSvg"), st = $("cState"), pts = chart.pts;
+  $("cTitle").textContent = subj.kind === "stock" ? `${subj.sym} · ${chart.range}` : `${subj.label} · ${chart.range}`;
+  const ref = chartRef(subj), lastP = pts.length ? pts[pts.length - 1].p : null;
+  const show = chart.hover != null && pts[chart.hover] ? pts[chart.hover] : null, headP = show ? show.p : lastP;
+  $("cPx").textContent = headP != null ? "$" + px(headP) : "—";
+  if (headP != null && ref) {
+    const d = headP - ref, lbl = show ? fmtT(show.t) : chart.range === "1D" ? "today" : "past " + {"1W": "week", "1M": "month", "3M": "3 months", "1Y": "year"}[chart.range];
+    $("cChg").className = "c " + cls(d); $("cChg").textContent = `${money(d, true)} (${pct(d / ref)}) ${lbl}`;
+  } else { $("cChg").className = "c muted"; $("cChg").innerHTML = "&nbsp;"; }
+
+  if (!pts.length) {
+    svg.innerHTML = ""; $("cTip").hidden = true; st.hidden = false;
+    st.textContent = chart.loading ? "Loading chart…" : chart.err ? (chart.err.code === "tool_error" ? "No price history for this range." : "Couldn't load the chart. Prices above still update.") : "No trades in this range yet.";
+    return;
+  }
+  st.hidden = true;
+  const box = $("cBox"), W = Math.max(240, box.clientWidth), H = box.clientHeight || 240;
+  const L = 8, R = 58, T = 12, B = 24, iw = W - L - R, ih = H - T - B;
+  let lo = Math.min(...pts.map(x => x.p)), hi = Math.max(...pts.map(x => x.p));
+  if (ref) { lo = Math.min(lo, ref); hi = Math.max(hi, ref); }
+  if (hi - lo < 1e-6) { hi += 0.5; lo -= 0.5; }
+  const padv = (hi - lo) * 0.08; lo -= padv; hi += padv;
+  const x = i => L + (pts.length === 1 ? iw : (i / (pts.length - 1)) * iw);
+  const y = v => T + (1 - (v - lo) / (hi - lo)) * ih;
+  const up = ref == null || lastP >= ref, color = up ? "var(--up)" : "var(--down)";
+  const line = pts.map((d, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(d.p).toFixed(1)}`).join("");
+  const area = `${line}L${x(pts.length - 1).toFixed(1)},${T + ih}L${x(0).toFixed(1)},${T + ih}Z`;
+  const yt = niceTicks(lo, hi, 4);
+  const xt = [0.08, 0.36, 0.64, 0.92].map(f => Math.round(f * (pts.length - 1))).filter((v, i, a) => a.indexOf(v) === i);
+  const li = pts.length - 1, isLive = (mode === "sim" || pts[li].live || Date.now() - pts[li].t < 15 * 60e3) && chart.range === "1D";
+  let h = `<defs><linearGradient id="cg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".18"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>`;
+  h += yt.map(v => `<line class="grid" x1="${L}" x2="${L + iw}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"/><text class="ax" x="${W - 4}" y="${(y(v) + 3.5).toFixed(1)}" text-anchor="end">${px(v)}</text>`).join("");
+  h += xt.map(i => `<text class="ax" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(fmtAxis(pts[i].t))}</text>`).join("");
+  if (ref) h += `<line class="refl" x1="${L}" x2="${L + iw}" y1="${y(ref).toFixed(1)}" y2="${y(ref).toFixed(1)}"/>`;
+  h += `<path d="${area}" fill="url(#cg)"/><path d="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  if (isLive) h += `<circle class="pulse" cx="${x(li).toFixed(1)}" cy="${y(pts[li].p).toFixed(1)}" r="4" fill="${color}"/>`;
+  h += `<circle cx="${x(li).toFixed(1)}" cy="${y(pts[li].p).toFixed(1)}" r="4" fill="${color}" stroke="var(--panel)" stroke-width="2"/>`;
+  if (show) {
+    const hx = x(chart.hover), hy = y(show.p);
+    h += `<line class="cross" x1="${hx.toFixed(1)}" x2="${hx.toFixed(1)}" y1="${T}" y2="${T + ih}"/><circle cx="${hx.toFixed(1)}" cy="${hy.toFixed(1)}" r="5" fill="${color}" stroke="var(--panel)" stroke-width="2"/>`;
+    const tip = $("cTip"); tip.hidden = false;
+    tip.innerHTML = `<b>$${px(show.p)}</b>${esc(fmtT(show.t))}`;
+    tip.style.left = Math.min(Math.max(hx, 70), W - 70) + "px";
+  } else $("cTip").hidden = true;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("aria-label", `${subj.label} price, ${chart.range}: from $${px(pts[0].p)} to $${px(lastP)}`);
+  svg.innerHTML = h;
+}
+function chartHover(e) {
+  if (!chart.pts.length) return;
+  const r = $("cBox").getBoundingClientRect(), W = r.width, iw = W - 8 - 58;
+  const f = Math.min(1, Math.max(0, (e.clientX - r.left - 8) / iw));
+  const i = Math.round(f * (chart.pts.length - 1));
+  if (i !== chart.hover) { chart.hover = i; drawChart(); }
+}
+$("cBox").addEventListener("pointermove", chartHover);
+$("cBox").addEventListener("pointerdown", chartHover);
+$("cBox").addEventListener("pointerleave", () => { chart.hover = null; drawChart(); });
+$("cRanges").onclick = e => {
+  const r = e.target.closest("button")?.dataset.r; if (!r || r === chart.range) return;
+  chart.range = r; for (const b of $("cRanges").children) b.setAttribute("aria-pressed", b.dataset.r === r);
+  loadChart();
+};
+if (window.ResizeObserver) new ResizeObserver(() => drawChart()).observe($("cBox"));
+
 // ---------- rendering ----------
 function stockPx(s) { return quotes[s]?.last; }
 function optMark(k, o) { const q = optQ[k]; return q?.mark ?? (q?.bid != null && q?.ask != null ? (q.bid + q.ask) / 2 : null); }
-function renderAll() { renderStrip(); renderQuote(); renderStockTicket(); renderOptTicket(); renderPositions(); renderOrders(); renderHistory(); }
+function renderAll() { renderStrip(); renderQuote(); renderStockTicket(); renderOptTicket(); renderPositions(); renderOrders(); renderHistory(); syncChart(); }
 
 function renderStrip() {
   const a = acct(); if (!a) return;
@@ -641,6 +843,7 @@ function renderChain(scroll) {
   if (scroll) { const r = $("chainBody").querySelector(".atm"); r && r.scrollIntoView({block: "center"}); window.scrollTo(window.scrollX, window.scrollY); }
 }
 function renderOptTicket() {
+  syncChart();
   const c = cur.picked, go = $("oGo");
   $("oLimWrap").hidden = $("oType").value !== "limit";
   if (!c) { $("oPicked").textContent = "Tap a strike to trade it."; go.disabled = true; go.textContent = "Pick a contract"; go.className = "btn buy"; $("oEst").textContent = "—"; $("oBe").textContent = "—"; return; }
@@ -732,8 +935,8 @@ function setTab(t, keepPicked) {
     } else if (!cur.chain.length && mode) loadExps();
   }
 }
-$("tStock").onclick = () => setTab("stock");
-$("tOpt").onclick = () => setTab("opt");
+$("tStock").onclick = () => { setTab("stock"); syncChart(); };
+$("tOpt").onclick = () => { setTab("opt"); syncChart(); };
 function setSide(p, v) {
   if (p === "s") cur.sSide = v; else cur.oSide = v;
   for (const b of $(p + "Side").children) b.classList.toggle("on", b.dataset.v === v);
