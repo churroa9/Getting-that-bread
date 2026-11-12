@@ -217,7 +217,7 @@ td .tag{font:600 10px var(--ui);letter-spacing:.06em;padding:2px 6px;border-radi
         <div class="chead">
           <div style="min-width:0"><div class="t" id="cTitle">AAPL</div><div class="p" id="cPx">—</div><div class="c" id="cChg">&nbsp;</div></div>
           <div class="ranges" role="group" aria-label="Chart range" id="cRanges">
-            <button data-r="1D" aria-pressed="true">1D</button><button data-r="1W" aria-pressed="false">1W</button><button data-r="1M" aria-pressed="false">1M</button><button data-r="3M" aria-pressed="false">3M</button><button data-r="1Y" aria-pressed="false">1Y</button>
+            <button data-r="5m" aria-pressed="false" title="Last 5 minutes">5m</button><button data-r="1D" aria-pressed="true">1D</button><button data-r="1W" aria-pressed="false">1W</button><button data-r="1M" aria-pressed="false">1M</button><button data-r="3M" aria-pressed="false">3M</button><button data-r="1Y" aria-pressed="false">1Y</button>
           </div>
         </div>
         <div class="cbox" id="cBox"><svg id="cSvg" role="img" aria-label="Price chart"></svg><div class="cstate" id="cState">Loading chart…</div><div class="tip" id="cTip" hidden></div></div>
@@ -469,7 +469,7 @@ async function refresh(force) {
     if (cur.chain.length) { const q = await m.optQuotes(cur.chain.map(c => c.key)); cur.chain.forEach(c => Object.assign(c, q[c.key] || {})); }
     lastUpdate = Date.now();
     chartTail();
-    if (Date.now() - chart.fetchedAt > 5 * 60e3) loadChart(true);
+    if (Date.now() - chart.fetchedAt > (chart.range === "5m" ? 60e3 : 5 * 60e3)) loadChart(true);
     if (mode === "live") { setFeed("ok"); showNotice(null); }
     settleExpired(); checkLimits();
   } catch (e) { if (mode === "live") liveError(e); else console.error(e); }
@@ -626,6 +626,7 @@ $("chainBody").onclick = e => {
 // One line, colored green or red by whether the price is above or below the reference
 // (previous close for 1D, the first point for longer ranges). The newest point follows live quotes.
 const RANGES = {
+  "5m": {ms: 20 * 60e3, iv: "15second", step: 15e3, n: 20, vol: 0.0006, win: 5 * 60e3},
   "1D": {ms: 4 * 864e5, iv: "5minute", step: 5 * 60e3, n: 78, vol: 0.0015},
   "1W": {ms: 7 * 864e5, iv: "30minute", step: 30 * 60e3, n: 65, vol: 0.004},
   "1M": {ms: 31 * 864e5, iv: "hour", step: 3600e3, n: 154, vol: 0.006},
@@ -657,7 +658,8 @@ sim.history = async function (subj, range) {
   const ticks = this.ticks[sym] || [], anchorT = ticks.length ? ticks[0].t : Date.now();
   let p = this.prev[sym], pts = [{t: anchorT, p}];
   for (let i = 1; i < R.n; i++) { const z = Math.sqrt(-2 * Math.log(rnd() || 1e-9)) * Math.cos(2 * Math.PI * rnd()); p = r2(p / Math.exp(R.vol * z)); pts.unshift({t: anchorT - i * R.step, p}); }
-  pts = pts.concat(ticks.filter((x, i) => i % 3 === 0 || i === ticks.length - 1));
+  pts = range === "5m" ? pts.concat(ticks) : pts.concat(ticks.filter((x, i) => i % 3 === 0 || i === ticks.length - 1));
+  if (range === "5m") { const end = pts[pts.length - 1].t; pts = pts.filter(x => x.t >= end - R.win); }
   if (subj.kind === "opt") {
     const c = subj.c, end = expiryMs(c.exp);
     pts = pts.map(x => { const T = Math.max(1e-6, (end - x.t) / 31557600000), iv = 0.32 + 0.12 * Math.abs(Math.log(c.strike / x.p));
@@ -677,6 +679,7 @@ async function loadChart(force) {
     let pts = await market().history(subj, chart.range);
     if (seq !== chart.seq) return;
     if (chart.range === "1D" && pts.length && mode === "live") { const d = etDay(pts[pts.length - 1].t); pts = pts.filter(x => etDay(x.t) === d); }
+    if (chart.range === "5m" && pts.length) { const end = pts[pts.length - 1].t; pts = pts.filter(x => x.t >= end - RANGES["5m"].win); }
     chart.pts = pts; chart.fetchedAt = Date.now();
   } catch (e) { if (seq !== chart.seq) return; chart.err = e; chart.pts = []; }
   chart.loading = false;
@@ -691,16 +694,18 @@ function chartRef(subj) {
 }
 // Fold the latest quote into the end of the line so the chart moves between bar fetches.
 function chartTail() {
-  if (!chart.pts.length || chart.range !== "1D") return;
+  if (!chart.pts.length || (chart.range !== "1D" && chart.range !== "5m")) return;
   const subj = chartSubject(), q = subj.kind === "stock" ? quotes[subj.sym] : optQ[subj.c.key];
   const p = subj.kind === "stock" ? q?.last : q?.mark;
   if (p == null) return;
   const last = chart.pts[chart.pts.length - 1];
   if (mode === "sim") { if (last.t < q.t) chart.pts.push({t: q.t, p}); if (chart.pts.length > 1500) chart.pts.shift(); }
+  else if (chart.range === "5m") { if (q.t > last.t && q.t - last.t < 30 * 60e3) chart.pts.push({t: q.t, p, live: true}); }
   else if (q.t > last.t && etDay(q.t) === etDay(last.t)) {
     if (last.live && q.t - chart.pts[chart.pts.length - 2].t < 5 * 60e3) { last.t = q.t; last.p = p; }
     else chart.pts.push({t: q.t, p, live: true});
   }
+  if (chart.range === "5m") { const end = chart.pts[chart.pts.length - 1].t; while (chart.pts.length > 2 && chart.pts[0].t < end - RANGES["5m"].win) chart.pts.shift(); }
 }
 function syncChart() {
   const subj = chartSubject();
@@ -715,12 +720,14 @@ function niceTicks(lo, hi, n) {
 }
 function fmtT(t) {
   const d = new Date(t);
+  if (chart.range === "5m") return d.toLocaleTimeString([], {hour: "numeric", minute: "2-digit", second: "2-digit"});
   if (chart.range === "1D") return d.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
   if (chart.range === "1W" || chart.range === "1M") return d.toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
   return d.toLocaleDateString([], {month: "short", day: "numeric", year: "numeric"});
 }
 function fmtAxis(t) {
   const d = new Date(t);
+  if (chart.range === "5m") return d.toLocaleTimeString([], {hour: "numeric", minute: "2-digit", second: "2-digit"});
   if (chart.range === "1D") return d.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
   if (chart.range === "1Y") return d.toLocaleDateString([], {month: "short", year: "2-digit"});
   return d.toLocaleDateString([], {month: "short", day: "numeric"});
@@ -732,13 +739,13 @@ function drawChart() {
   const show = chart.hover != null && pts[chart.hover] ? pts[chart.hover] : null, headP = show ? show.p : lastP;
   $("cPx").textContent = headP != null ? "$" + px(headP) : "—";
   if (headP != null && ref) {
-    const d = headP - ref, lbl = show ? fmtT(show.t) : chart.range === "1D" ? "today" : "past " + {"1W": "week", "1M": "month", "3M": "3 months", "1Y": "year"}[chart.range];
+    const d = headP - ref, lbl = show ? fmtT(show.t) : chart.range === "1D" ? "today" : "past " + {"5m": "5 minutes", "1W": "week", "1M": "month", "3M": "3 months", "1Y": "year"}[chart.range];
     $("cChg").className = "c " + cls(d); $("cChg").textContent = `${money(d, true)} (${pct(d / ref)}) ${lbl}`;
   } else { $("cChg").className = "c muted"; $("cChg").innerHTML = "&nbsp;"; }
 
   if (!pts.length) {
     svg.innerHTML = ""; $("cTip").hidden = true; st.hidden = false;
-    st.textContent = chart.loading ? "Loading chart…" : chart.err ? (chart.err.code === "tool_error" ? "No price history for this range." : "Couldn't load the chart. Prices above still update.") : "No trades in this range yet.";
+    st.textContent = chart.loading ? "Loading chart…" : chart.err ? (chart.err.code === "tool_error" ? "No price history for this range." : "Couldn't load the chart. Prices above still update.") : chart.range === "5m" ? "No trades in the last 5 minutes. The market may be closed." : "No trades in this range yet.";
     return;
   }
   st.hidden = true;
@@ -755,7 +762,7 @@ function drawChart() {
   const area = `${line}L${x(pts.length - 1).toFixed(1)},${T + ih}L${x(0).toFixed(1)},${T + ih}Z`;
   const yt = niceTicks(lo, hi, 4);
   const xt = [0.08, 0.36, 0.64, 0.92].map(f => Math.round(f * (pts.length - 1))).filter((v, i, a) => a.indexOf(v) === i);
-  const li = pts.length - 1, isLive = (mode === "sim" || pts[li].live || Date.now() - pts[li].t < 15 * 60e3) && chart.range === "1D";
+  const li = pts.length - 1, isLive = (mode === "sim" || pts[li].live || Date.now() - pts[li].t < 15 * 60e3) && (chart.range === "1D" || chart.range === "5m");
   let h = `<defs><linearGradient id="cg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".18"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>`;
   h += yt.map(v => `<line class="grid" x1="${L}" x2="${L + iw}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"/><text class="ax" x="${W - 4}" y="${(y(v) + 3.5).toFixed(1)}" text-anchor="end">${px(v)}</text>`).join("");
   h += xt.map(i => `<text class="ax" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(fmtAxis(pts[i].t))}</text>`).join("");
