@@ -112,6 +112,20 @@ td .tag{font:600 10px var(--ui);letter-spacing:.06em;padding:2px 6px;border-radi
 .atm td{border-bottom:2px solid var(--accent)}
 .foot{font-size:12px;color:var(--muted);text-align:center;padding-top:4px}
 
+/* Claude's account */
+.who{display:inline-flex}
+.bookgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.book{background:var(--sunk);border-radius:10px;padding:12px;display:grid;gap:4px;min-width:0}
+.book .v{font:600 18px var(--num)}
+.book small{color:var(--muted);font-size:12px}
+.rules{margin:0;padding-left:18px;display:grid;gap:4px;font-size:13px;color:var(--muted)}
+.why{display:block;white-space:normal;color:var(--muted);font-size:12px;line-height:1.4;max-width:46ch;margin-top:2px}
+.bk{font:600 10px var(--ui);letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:4px;margin-right:6px}
+.bk.picks{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+.bk.short{background:var(--warn-soft);color:var(--warn)}
+tr.botpos{cursor:pointer}
+tr.botpos:hover td{background:var(--sunk)}
+
 /* price chart */
 .chead{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;flex-wrap:wrap;padding:14px 14px 4px}
 .chead .t{font:600 13px var(--ui);color:var(--muted)}
@@ -136,7 +150,9 @@ td .tag{font:600 10px var(--ui);letter-spacing:.06em;padding:2px 6px;border-radi
 
 <div class="wrap">
   <div class="bar">
-    <div class="brand"><h1>Bread Paper Trader</h1><span class="paper">PAPER · NO REAL ORDERS</span></div>
+    <div class="brand"><h1>Bread Paper Trader</h1><span class="paper">PAPER · NO REAL ORDERS</span>
+      <div class="seg who" role="group" aria-label="Account"><button id="vMe" aria-pressed="true">Your account</button><button id="vBot" aria-pressed="false">Claude's account</button></div>
+    </div>
     <div class="feed">
       <span id="feedDot" class="dot"></span><span id="feedTxt" class="muted" style="font-size:12px">Connecting…</span>
       <div class="seg" role="group" aria-label="Market data">
@@ -157,7 +173,24 @@ td .tag{font:600 10px var(--ui);letter-spacing:.06em;padding:2px 6px;border-radi
   <div id="notice" hidden></div>
 
   <div class="main">
-    <section class="card" aria-label="Order ticket">
+    <section class="card" id="botPanel" aria-label="Claude's account" hidden>
+      <header><h2>How Claude is trading</h2><span class="muted" id="botRun" style="font-size:12px"></span></header>
+      <div class="body">
+        <div class="bookgrid">
+          <div class="book"><span><span class="bk picks">Picks</span></span><div class="v num" id="bkPicks">—</div><small id="bkPicksS">—</small></div>
+          <div class="book"><span><span class="bk short">0–2 day</span></span><div class="v num" id="bkShort">—</div><small id="bkShortS">—</small></div>
+        </div>
+        <ul class="rules">
+          <li><b>Picks:</b> Claude's best idea of the day, about 2% of the account at risk per trade, options a few weeks out.</li>
+          <li><b>0–2 day:</b> options expiring today, tomorrow or the day after, $100–500 each.</li>
+          <li>Every position has a stop, a profit target and a sell-by time, shown under it.</li>
+          <li>Claude checks in on weekdays at about 10:37am, 12:37pm and 3:37pm New York time.</li>
+          <li>Fills use live Robinhood bid and ask prices. Nothing is sent to a broker.</li>
+        </ul>
+        <div id="botNotes" class="muted" style="font-size:13px" hidden></div>
+      </div>
+    </section>
+    <section class="card" id="ticketCard" aria-label="Order ticket">
       <div class="tabs" role="tablist">
         <button role="tab" id="tStock" aria-selected="true">Stocks</button>
         <button role="tab" id="tOpt" aria-selected="false">Options</button>
@@ -226,7 +259,7 @@ td .tag{font:600 10px var(--ui);letter-spacing:.06em;padding:2px 6px;border-radi
         <header><h2>Positions</h2><span class="muted" id="asOf" style="font-size:12px"></span></header>
         <div class="tw"><table><thead><tr><th>Symbol</th><th>Qty</th><th>Avg cost</th><th>Price</th><th>Value</th><th>P&amp;L</th><th></th></tr></thead><tbody id="posBody"></tbody></table></div>
       </section>
-      <section class="card">
+      <section class="card" id="ordCard">
         <header><h2>Open orders</h2></header>
         <div class="tw"><table><thead><tr><th>Order</th><th>Qty</th><th>Limit</th><th>Placed</th><th></th></tr></thead><tbody id="ordBody"></tbody></table></div>
       </section>
@@ -260,7 +293,8 @@ const dayStr = t => new Date(t).toLocaleDateString([], {month: "short", day: "nu
 const freshAcct = () => ({cash: START_CASH, stocks: {}, options: {}, orders: [], history: [], simPrices: {}});
 let store = {mode: null, accounts: {live: freshAcct(), sim: freshAcct()}};
 try { const raw = localStorage.getItem(LS_KEY); if (raw) store = Object.assign(store, JSON.parse(raw)); } catch (e) {}
-const acct = () => store.accounts[mode || "sim"];
+let view = "me", botAcct = null, botUpdated = null;
+const acct = () => view === "bot" ? (botAcct || freshAcct()) : store.accounts[mode || "sim"];
 
 let docRef = null, saving = false, saveAgain = false;
 async function save() {
@@ -380,6 +414,7 @@ const sim = {
   async optQuotes(keys) {
     const out = {};
     for (const k of keys) {
+      if (!k.includes("|")) continue; // a real Robinhood contract id: no simulated price for it
       const [sym, exp, type, strike] = k.split("|");
       const S = this.price(sym), K = +strike, T = Math.max(1e-6, (expiryMs(exp) - Date.now()) / 31557600000);
       const iv = 0.32 + 0.12 * Math.abs(Math.log(K / S));
@@ -514,6 +549,7 @@ function fillOpt(a, side, c, qty, price) {
   return null;
 }
 function settleExpired() {
+  if (view === "bot") return;
   const a = acct(); let changed = false;
   for (const [k, o] of Object.entries(a.options)) {
     if (Date.now() < expiryMs(o.exp)) continue;
@@ -529,6 +565,7 @@ function settleExpired() {
   if (changed) save();
 }
 function checkLimits() {
+  if (view === "bot") return;
   const a = acct(); if (!a.orders.length) return;
   let changed = false;
   a.orders = a.orders.filter(o => {
@@ -801,7 +838,7 @@ if (window.ResizeObserver) new ResizeObserver(() => drawChart()).observe($("cBox
 // ---------- rendering ----------
 function stockPx(s) { return quotes[s]?.last; }
 function optMark(k, o) { const q = optQ[k]; return q?.mark ?? (q?.bid != null && q?.ask != null ? (q.bid + q.ask) / 2 : null); }
-function renderAll() { renderStrip(); renderQuote(); renderStockTicket(); renderOptTicket(); renderPositions(); renderOrders(); renderHistory(); syncChart(); }
+function renderAll() { renderBot(); renderStrip(); renderQuote(); renderStockTicket(); renderOptTicket(); renderPositions(); renderOrders(); renderHistory(); syncChart(); }
 
 function renderStrip() {
   const a = acct(); if (!a) return;
@@ -875,12 +912,13 @@ function renderPositions() {
   }
   for (const [k, o] of Object.entries(a.options)) {
     const m = optMark(k, o), val = m != null ? m * o.qty * o.mult : null, pl = val != null ? val - o.avg * o.qty * o.mult : null;
-    const dte = Math.ceil((expiryMs(o.exp) - Date.now()) / 864e5);
-    rows.push(`<tr><td><b>${esc(o.sym)}</b> ${px(o.strike)}${o.type === "call" ? "C" : "P"}<span class="tag">${dte}d</span></td><td>${o.qty}</td><td>${px(o.avg)}</td><td>${px(m)}</td><td>${val != null ? money(val) : "—"}</td>
+    const dte = Math.round((Date.parse(o.exp + "T12:00:00Z") - Date.parse(etDay(Date.now()) + "T12:00:00Z")) / 864e5);
+    const bot = view === "bot", rules = bot && o.stop ? `<span class="why">Stop ${px(o.stop)} · target ${px(o.target)} · sell by ${esc(new Date(o.exitBy).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"}))}</span>` : "";
+    rows.push(`<tr${bot ? ` class="botpos" data-bot="${esc(k)}"` : ""}><td>${bot && o.book ? `<span class="bk ${o.book === "short" ? "short" : "picks"}">${o.book === "short" ? "0–2d" : "Pick"}</span>` : ""}<b>${esc(o.sym)}</b> ${px(o.strike)}${o.type === "call" ? "C" : "P"}<span class="tag">${dte <= 0 ? "today" : dte + "d"}</span>${rules}</td><td>${o.qty}</td><td>${px(o.avg)}</td><td>${px(m)}</td><td>${val != null ? money(val) : "—"}</td>
       <td class="${cls(pl ?? 0)}">${pl != null ? `${money(pl, true)}<br><small>${pct(pl / (o.avg * o.qty * o.mult))}</small>` : "—"}</td>
-      <td><button class="btn small" data-close-o="${esc(k)}">Close</button></td></tr>`);
+      <td>${bot ? "" : `<button class="btn small" data-close-o="${esc(k)}">Close</button>`}</td></tr>`);
   }
-  $("posBody").innerHTML = rows.join("") || `<tr><td colspan="7" class="empty">No positions yet. Place a trade from the ticket to start.</td></tr>`;
+  $("posBody").innerHTML = rows.join("") || `<tr><td colspan="7" class="empty">${view === "bot" ? (botAcct ? "Claude has no open positions right now." : "Claude hasn't traded yet.") : "No positions yet. Place a trade from the ticket to start."}</td></tr>`;
 }
 function renderOrders() {
   const a = acct();
@@ -890,7 +928,7 @@ function renderOrders() {
 }
 function renderHistory() {
   const a = acct();
-  $("histBody").innerHTML = a.history.map(h => `<tr><td>${dayStr(h.t)} ${timeStr(h.t)}</td><td style="text-align:left;font-family:var(--ui)">${esc(h.label)}</td><td>${h.qty}</td><td>${px(h.price)}</td>
+  $("histBody").innerHTML = a.history.map(h => `<tr><td>${dayStr(h.t)} ${timeStr(h.t)}</td><td style="text-align:left;font-family:var(--ui);white-space:normal;min-width:200px">${h.book ? `<span class="bk ${h.book === "short" ? "short" : "picks"}">${h.book === "short" ? "0–2d" : "Pick"}</span>` : ""}${esc(h.label)}${h.why ? `<span class="why">${esc(h.why)}</span>` : ""}</td><td>${h.qty}</td><td>${px(h.price)}</td>
     <td class="${cls(h.amount)}">${h.amount ? money(h.amount, true) : "—"}</td></tr>`).join("")
     || `<tr><td colspan="5" class="empty">Your fills, expirations and cancellations will show here.</td></tr>`;
 }
@@ -967,6 +1005,40 @@ $("reset").onclick = () => {
   store.accounts[mode] = freshAcct(); optQ = {}; save(); renderAll(); refresh(true);
 };
 
+// ---------- Claude's account ----------
+function renderBot() {
+  const bot = view === "bot";
+  $("vMe").setAttribute("aria-pressed", !bot); $("vBot").setAttribute("aria-pressed", bot);
+  $("botPanel").hidden = !bot; $("ticketCard").hidden = bot; $("ordCard").hidden = bot; $("reset").hidden = bot;
+  if (!bot) return;
+  const a = botAcct;
+  $("botRun").textContent = botUpdated ? "Last check-in " + new Date(botUpdated).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"}) : "";
+  for (const [id, b] of [["Picks", "picks"], ["Short", "short"]]) {
+    const st = a?.books?.[b] || {realized: 0, closed: 0, wins: 0};
+    let unreal = 0, open = 0;
+    for (const [k, o] of Object.entries(a?.options || {})) if ((o.book || "picks") === b) { open++; const m = optMark(k, o); if (m != null) unreal += (m - o.avg) * o.qty * o.mult; }
+    const tot = st.realized + unreal;
+    $("bk" + id).className = "v num " + cls(tot); $("bk" + id).textContent = money(tot, true);
+    $("bk" + id + "S").textContent = `${open} open · ${st.closed} closed${st.closed ? ` · ${Math.round(100 * st.wins / st.closed)}% winners` : ""} · realized ${money(st.realized, true)}`;
+  }
+  $("botNotes").hidden = !a?.notes; $("botNotes").textContent = a?.notes || "";
+}
+function setView(v) {
+  view = v; cur.picked = null;
+  if (v === "me") cur.tab = "stock";
+  if (v === "bot" && mode !== "live" && mcp) { setMode("live", false); return; }
+  if (v === "bot" && !mcp) showNotice("warn", "Claude's positions need live Robinhood prices to show current values. Open this page on claude.ai with Robinhood connected.");
+  renderAll(); refresh(true);
+}
+$("vMe").onclick = () => view !== "me" && setView("me");
+$("vBot").onclick = () => view !== "bot" && setView("bot");
+$("posBody").addEventListener("click", e => {
+  const tr = e.target.closest("tr[data-bot]"); if (!tr || !botAcct) return;
+  const o = botAcct.options[tr.dataset.bot]; if (!o) return;
+  cur.picked = Object.assign({}, o, optQ[o.key] || {}); cur.tab = "opt"; cur.sym = o.sym; syncChart();
+  $("cBox").scrollIntoView({block: "center", behavior: "smooth"});
+});
+
 // ---------- boot ----------
 renderAll();
 (async () => {
@@ -983,6 +1055,15 @@ renderAll();
       else if (store.accounts.live.history.length || store.accounts.sim.history.length) save();
     }
   } catch (e) { docRef = null; }
+  if (db) {
+    try {
+      db.doc("bot/state").onSnapshot(snap => {
+        if (!snap.exists) return;
+        try { const d = snap.data(); botAcct = JSON.parse(d.json); botUpdated = d.updatedAt; } catch (e) { return; }
+        if (view === "bot") { renderAll(); refresh(true); }
+      }, () => {});
+    } catch (e) {}
+  }
   setMode(store.mode === "sim" || !mcp ? "sim" : "live", false);
   if (!mcp) showNotice("warn", "This view can't reach your Robinhood connector, so prices are simulated. Open the page on claude.ai with Robinhood connected for live quotes.");
 })();
