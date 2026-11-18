@@ -114,7 +114,7 @@ td .tag{font:600 10px var(--ui);letter-spacing:.06em;padding:2px 6px;border-radi
 
 /* Claude's account */
 .who{display:inline-flex}
-.bookgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.bookgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px}
 .book{background:var(--sunk);border-radius:10px;padding:12px;display:grid;gap:4px;min-width:0}
 .book .v{font:600 18px var(--num)}
 .book small{color:var(--muted);font-size:12px}
@@ -123,6 +123,7 @@ td .tag{font:600 10px var(--ui);letter-spacing:.06em;padding:2px 6px;border-radi
 .bk{font:600 10px var(--ui);letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:4px;margin-right:6px}
 .bk.picks{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
 .bk.short{background:var(--warn-soft);color:var(--warn)}
+.bk.sell{background:var(--up-soft);color:var(--up)}
 tr.botpos{cursor:pointer}
 tr.botpos:hover td{background:var(--sunk)}
 
@@ -179,10 +180,13 @@ tr.botpos:hover td{background:var(--sunk)}
         <div class="bookgrid">
           <div class="book"><span><span class="bk picks">Picks</span></span><div class="v num" id="bkPicks">—</div><small id="bkPicksS">—</small></div>
           <div class="book"><span><span class="bk short">0–2 day</span></span><div class="v num" id="bkShort">—</div><small id="bkShortS">—</small></div>
+          <div class="book"><span><span class="bk sell">Selling</span></span><div class="v num" id="bkSell">—</div><small id="bkSellS">—</small></div>
         </div>
         <ul class="rules">
-          <li><b>Picks:</b> Claude's best idea of the day, about 2% of the account at risk per trade, options a few weeks out.</li>
-          <li><b>0–2 day:</b> options expiring today, tomorrow or the day after, $100–500 each.</li>
+          <li><b>Picks:</b> Claude's best idea, options 3–8 weeks out, about 2% of the account at risk. Only stocks in a multi-week uptrend or downtrend.</li>
+          <li><b>0–2 day:</b> options expiring within 2 days, $100–500 each. Only on clear trend days, in the trend's direction.</li>
+          <li><b>Selling:</b> sells options for premium as $5-wide spreads, so the most a trade can lose is fixed (1% of the account at most). Wins when SPY, QQQ or IWM stays out of a price zone, so it suits choppy markets.</li>
+          <li>Claude can change the rules to lower risk or improve the odds, and logs every change with its reason.</li>
           <li>Every position has a stop, a profit target and a sell-by time, shown under it.</li>
           <li>Claude checks in on weekdays at about 10:37am, 12:37pm and 3:37pm New York time.</li>
           <li>Fills use live Robinhood bid and ask prices. Nothing is sent to a broker.</li>
@@ -913,8 +917,11 @@ function renderPositions() {
   for (const [k, o] of Object.entries(a.options)) {
     const m = optMark(k, o), val = m != null ? m * o.qty * o.mult : null, pl = val != null ? val - o.avg * o.qty * o.mult : null;
     const dte = Math.round((Date.parse(o.exp + "T12:00:00Z") - Date.parse(etDay(Date.now()) + "T12:00:00Z")) / 864e5);
-    const bot = view === "bot", rules = bot && o.stop ? `<span class="why">Stop ${px(o.stop)} · target ${px(o.target)} · sell by ${esc(new Date(o.exitBy).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"}))}</span>` : "";
-    rows.push(`<tr${bot ? ` class="botpos" data-bot="${esc(k)}"` : ""}><td>${bot && o.book ? `<span class="bk ${o.book === "short" ? "short" : "picks"}">${o.book === "short" ? "0–2d" : "Pick"}</span>` : ""}<b>${esc(o.sym)}</b> ${px(o.strike)}${o.type === "call" ? "C" : "P"}<span class="tag">${dte <= 0 ? "today" : dte + "d"}</span>${rules}</td><td>${o.qty}</td><td>${px(o.avg)}</td><td>${px(m)}</td><td>${val != null ? money(val) : "—"}</td>
+    const bot = view === "bot", by = o.exitBy && !isNaN(Date.parse(o.exitBy)) ? ` · ${o.spread ? "close" : "sell"} by ${esc(new Date(o.exitBy).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"}))}` : "";
+    const rules = !bot || o.stop == null ? "" : o.spread
+      ? `<span class="why">Spread: close if it costs $${px(o.stop)} or more to close (stop), or $${px(o.target)} or less (target)${by}</span>`
+      : `<span class="why">Stop ${px(o.stop)} · target ${px(o.target)}${by}</span>`;
+    rows.push(`<tr${bot ? ` class="botpos" data-bot="${esc(k)}"` : ""}><td>${bot && o.book ? `<span class="bk ${bookCls(o.book)}">${bookName(o.book)}</span>${o.qty < 0 ? `<span class="tag">sold</span> ` : ""}` : ""}<b>${esc(o.sym)}</b> ${px(o.strike)}${o.type === "call" ? "C" : "P"}<span class="tag">${dte <= 0 ? "today" : dte + "d"}</span>${rules}</td><td>${o.qty}</td><td>${px(o.avg)}</td><td>${px(m)}</td><td>${val != null ? money(val) : "—"}</td>
       <td class="${cls(pl ?? 0)}">${pl != null ? `${money(pl, true)}<br><small>${pct(pl / (o.avg * o.qty * o.mult))}</small>` : "—"}</td>
       <td>${bot ? "" : `<button class="btn small" data-close-o="${esc(k)}">Close</button>`}</td></tr>`);
   }
@@ -928,7 +935,7 @@ function renderOrders() {
 }
 function renderHistory() {
   const a = acct();
-  $("histBody").innerHTML = a.history.map(h => `<tr><td>${dayStr(h.t)} ${timeStr(h.t)}</td><td style="text-align:left;font-family:var(--ui);white-space:normal;min-width:200px">${h.book ? `<span class="bk ${h.book === "short" ? "short" : "picks"}">${h.book === "short" ? "0–2d" : "Pick"}</span>` : ""}${esc(h.label)}${h.why ? `<span class="why">${esc(h.why)}</span>` : ""}</td><td>${h.qty}</td><td>${px(h.price)}</td>
+  $("histBody").innerHTML = a.history.map(h => `<tr><td>${dayStr(h.t)} ${timeStr(h.t)}</td><td style="text-align:left;font-family:var(--ui);white-space:normal;min-width:200px">${h.book ? `<span class="bk ${bookCls(h.book)}">${bookName(h.book)}</span>` : ""}${esc(h.label)}${h.why ? `<span class="why">${esc(h.why)}</span>` : ""}</td><td>${h.qty}</td><td>${px(h.price)}</td>
     <td class="${cls(h.amount)}">${h.amount ? money(h.amount, true) : "—"}</td></tr>`).join("")
     || `<tr><td colspan="5" class="empty">Your fills, expirations and cancellations will show here.</td></tr>`;
 }
@@ -1006,6 +1013,8 @@ $("reset").onclick = () => {
 };
 
 // ---------- Claude's account ----------
+const bookCls = b => b === "short" ? "short" : b === "sell" ? "sell" : "picks";
+const bookName = b => b === "short" ? "0–2d" : b === "sell" ? "Sell" : "Pick";
 function renderBot() {
   const bot = view === "bot";
   $("vMe").setAttribute("aria-pressed", !bot); $("vBot").setAttribute("aria-pressed", bot);
@@ -1013,10 +1022,12 @@ function renderBot() {
   if (!bot) return;
   const a = botAcct;
   $("botRun").textContent = botUpdated ? "Last check-in " + new Date(botUpdated).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"}) : "";
-  for (const [id, b] of [["Picks", "picks"], ["Short", "short"]]) {
+  for (const [id, b] of [["Picks", "picks"], ["Short", "short"], ["Sell", "sell"]]) {
     const st = a?.books?.[b] || {realized: 0, closed: 0, wins: 0};
     let unreal = 0, open = 0;
-    for (const [k, o] of Object.entries(a?.options || {})) if ((o.book || "picks") === b) { open++; const m = optMark(k, o); if (m != null) unreal += (m - o.avg) * o.qty * o.mult; }
+    const seen = new Set();
+    for (const [k, o] of Object.entries(a?.options || {})) if ((o.book || "picks") === b) { seen.add(o.spread || k); const m = optMark(k, o); if (m != null) unreal += (m - o.avg) * o.qty * o.mult; }
+    open = seen.size;
     const tot = st.realized + unreal;
     $("bk" + id).className = "v num " + cls(tot); $("bk" + id).textContent = money(tot, true);
     $("bk" + id + "S").textContent = `${open} open · ${st.closed} closed${st.closed ? ` · ${Math.round(100 * st.wins / st.closed)}% winners` : ""} · realized ${money(st.realized, true)}`;
