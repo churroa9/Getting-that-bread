@@ -92,6 +92,9 @@ so the spread counts as one trade.
 - Delta 0.35–0.60. Size so a stop at −50% loses about 2% of current account value. At most 1 new pick per day and
   2 open at once. Only with a multi-week trend (price above both 20- and 50-day averages for calls, below for puts)
   **and** relative strength vs. SPY. Target +60% to +100%, `exitBy` 14 calendar days before expiration.
+- **Sell a pick as soon as it stops meeting the entry rules**: for a call, the stock is below its 20-day average at a
+  check-in; for a put, above it. Don't wait for the stop. Look for a replacement among stocks that do qualify,
+  checking a broad list (tech, retail, health care, energy, banks), not only the names already traded.
 
 ### Account-wide limits
 - Keep at least $50,000 in cash. Total open risk (long premium at stake + spread max losses) ≤ 8% of account value.
@@ -117,3 +120,6 @@ winning**, based on the account's own results or clear market evidence. When you
   now only on trend days and in the trend's direction (no bounce bets), max 2/day and 2 open, stop tightened to −35%;
   no opposing call/put bets; added the Selling book (defined-risk credit spreads), which benefits from choppy markets;
   picks limited to 2 open and require a multi-week trend plus relative strength.
+- 2026-11-20 (user's suggestion): a pick is sold as soon as it no longer meets the entry rules, instead of waiting for
+  its stop. AAPL ($344.09) fell below its 20-day average ($347.74) and was down 33%; sold for −$1,300 and replaced with
+  WMT calls (above its 20- and 50-day averages, +2.2% on a day SPY fell 3.1%).
