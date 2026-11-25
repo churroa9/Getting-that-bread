@@ -85,6 +85,8 @@ so the spread counts as one trade.
   average or near the top of the range. Never both on the same underlying and expiration.
 - Size: max loss per spread = (width − credit) × 100. **Max loss per trade ≤ 1% of account value**; total max loss
   across all open spreads ≤ 3%. At most 1 new spread per day and 3 open at once.
+- **Volatility pause:** no new spreads while SPY or QQQ has closed more than 2% up or down in any of the last
+  3 sessions (today's move so far counts). Big swings blow through short strikes before time decay can help.
 - Stop: close when the cost to close reaches 2× the credit. Target: close at 50% of the credit kept.
   Time: close 2 trading days before expiration.
 
@@ -123,3 +125,6 @@ winning**, based on the account's own results or clear market evidence. When you
 - 2026-11-20 (user's suggestion): a pick is sold as soon as it no longer meets the entry rules, instead of waiting for
   its stop. AAPL ($344.09) fell below its 20-day average ($347.74) and was down 33%; sold for −$1,300 and replaced with
   WMT calls (above its 20- and 50-day averages, +2.2% on a day SPY fell 3.1%).
+- 2026-11-25: volatility pause for the Selling book. The $735/$740 call spread was stopped out (−$246) by a 5.3% SPY
+  gap; QQQ then moved −5.4%, +7.9%, −2.6% and −3.8% on consecutive days. No new spreads while SPY or QQQ moved >2%
+  in any of the last 3 sessions.
